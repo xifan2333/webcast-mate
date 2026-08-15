@@ -125,8 +125,7 @@ func (c *Client) loginQR(ctx context.Context) (*Session, error) {
 
 	fmt.Fprintln(os.Stderr, "bilibili: scan QR with bilibili app")
 	fmt.Fprintln(os.Stderr, gen.Data.URL)
-	// try terminal QR if qrencode exists
-	printTerminalQR(gen.Data.URL)
+	printQR(gen.Data.URL, "login-qr.png")
 
 	deadline := time.Now().Add(3 * time.Minute)
 	for {
@@ -190,15 +189,38 @@ func (c *Client) loginQR(ctx context.Context) (*Session, error) {
 	}
 }
 
-func printTerminalQR(u string) {
-	// best-effort: qrencode -t ANSIUTF8
-	// avoid hard dep
-	path, err := lookPath("qrencode")
-	if err != nil {
+// printQR writes a PNG (square, scannable) and optionally a terminal preview.
+// ANSIUTF8 often looks stretched in modern terminals; PNG is the reliable path.
+func printQR(content, filename string) {
+	if content == "" {
 		return
 	}
-	cmd := newCmd(path, "-t", "ANSIUTF8", u)
+	qrencode, err := lookPath("qrencode")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "bilibili: install qrencode for QR image (pacman -S qrencode)")
+		return
+	}
+
+	// 1) PNG — correct geometry for phone camera
+	if dir, err := session.PlatformDir("bilibili"); err == nil {
+		pngPath := dir + "/" + filename
+		cmd := newCmd(qrencode, "-t", "PNG", "-s", "8", "-m", "2", "-o", pngPath, content)
+		if err := cmd.Run(); err == nil {
+			fmt.Fprintln(os.Stderr, "bilibili: QR image:", pngPath)
+			// best-effort open image viewer (non-blocking)
+			if open, err := lookPath("xdg-open"); err == nil {
+				c := newCmd(open, pngPath)
+				_ = c.Start()
+			}
+		}
+	}
+
+	// 2) terminal preview — UTF8 blocks (usually squarer than ANSIUTF8)
+	cmd := newCmd(qrencode, "-t", "UTF8", "-m", "1", content)
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	_ = cmd.Run()
 }
+
+// printTerminalQR is kept for face-auth call sites.
+func printTerminalQR(u string) { printQR(u, "face-qr.png") }

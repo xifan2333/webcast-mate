@@ -130,7 +130,7 @@ func (c *Client) waitFaceAuth(ctx context.Context, roomID, qr, csrf string) erro
 	if qr != "" {
 		fmt.Fprintln(os.Stderr, "bilibili: face auth required — scan with bilibili app")
 		fmt.Fprintln(os.Stderr, qr)
-		printTerminalQR(qr)
+		printQR(qr, "face-qr.png")
 	} else {
 		fmt.Fprintln(os.Stderr, "bilibili: face auth required (no qr url)")
 	}
