@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/xifan2333/webcast-mate/internal/qrterm"
 	"github.com/xifan2333/webcast-mate/internal/session"
 )
 
@@ -189,38 +190,16 @@ func (c *Client) loginQR(ctx context.Context) (*Session, error) {
 	}
 }
 
-// printQR writes a PNG (square, scannable) and optionally a terminal preview.
-// ANSIUTF8 often looks stretched in modern terminals; PNG is the reliable path.
+// printQR prints a scannable terminal QR (half-block, correct aspect).
+// filename is unused (kept for call-site stability); no PNG/xdg-open path.
 func printQR(content, filename string) {
+	_ = filename
 	if content == "" {
 		return
 	}
-	qrencode, err := lookPath("qrencode")
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "bilibili: install qrencode for QR image (pacman -S qrencode)")
-		return
+	if err := qrterm.Fprint(os.Stderr, content); err != nil {
+		fmt.Fprintf(os.Stderr, "bilibili: qr render: %v\n", err)
 	}
-
-	// 1) PNG — correct geometry for phone camera
-	if dir, err := session.PlatformDir("bilibili"); err == nil {
-		pngPath := dir + "/" + filename
-		cmd := newCmd(qrencode, "-t", "PNG", "-s", "8", "-m", "2", "-o", pngPath, content)
-		if err := cmd.Run(); err == nil {
-			fmt.Fprintln(os.Stderr, "bilibili: QR image:", pngPath)
-			// best-effort open image viewer (non-blocking)
-			if open, err := lookPath("xdg-open"); err == nil {
-				c := newCmd(open, pngPath)
-				_ = c.Start()
-			}
-		}
-	}
-
-	// 2) terminal preview — UTF8 blocks (usually squarer than ANSIUTF8)
-	cmd := newCmd(qrencode, "-t", "UTF8", "-m", "1", content)
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
-	_ = cmd.Run()
 }
 
-// printTerminalQR is kept for face-auth call sites.
-func printTerminalQR(u string) { printQR(u, "face-qr.png") }
+func printTerminalQR(u string) { printQR(u, "") }
