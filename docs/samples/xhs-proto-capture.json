@@ -1,0 +1,789 @@
+{
+  "ws_url": "wss://apppush-rws.xiaohongshu.com/rwp",
+  "handshake_sent": [
+    "{\"v\":1,\"t\":2,\"m\":\"13610d8f75dcd6-1a005fcfb12\",\"b\":{\"d\":{\"a\":1,\"s\":0,\"b\":{\"appId\":\"xhs-pc\",\"authInfo\":{\"authType\":\"generic\",\"sid\":\"a1:Cl8KHwoYNmE4MDgyNDkwMDAwMDAwMDEzMDMxYzA5EgNyZWQSNAoHYnJvd3NlchIDd2ViGiQ1NTI0Y2JiNC03MzIxLTQ4NGUtOTY1Yy03ZDM5OWZhZWIzZGYaBnhocy1wYxACGOBOIJX386+ANCosMlJiUGxPeDZVOXAvdFErZzU5dGd1WTZlN2xKekhEd1gzaVVrelcwbFIrRT0=\",\"uid\":\"6a8082490000000013031c09\",\"domain\":\"red\"},\"deviceInfo\":{\"deviceId\":\"5524cbb4-7321-484e-965c-7d399faeb3df\",\"fingerprint\":\"1786806860182\",\"platform\":\"browser\",\"os\":\"web\",\"osVersion\":\"10.15\",\"deviceName\":\"Chrome\",\"appVersion\":\"131.0.0.0\",\"userAgent\":\"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36\"},\"serviceTag\":\"\",\"bizInfos\":[{\"bizName\":\"push\",\"serializeType\":\"json\"}],\"roomInfo\":[],\"roomInfos\":[],\"tagInfo\":[],\"extInfo\":{},\"state\":1}}}}",
+    "{\"v\":1,\"t\":2,\"m\":\"4307aa6ab8e3a-1a005fcfd24\",\"b\":{\"d\":{\"a\":1,\"s\":1,\"b\":{\"bizInfo\":{\"bizName\":\"room\",\"serializeType\":\"json\"},\"register\":true}}}}",
+    "{\"v\":1,\"t\":2,\"m\":\"14c2ade6084c6c-1a005fcfd3f\",\"b\":{\"d\":{\"a\":1,\"s\":8,\"b\":{\"info\":{\"bizName\":\"room\",\"roomId\":\"570409528162863169\",\"roomType\":\"LIVE\"}}}}}",
+    "{\"v\":1,\"t\":3,\"m\":\"138bbb7b304bde-1a005fcfdbb\",\"b\":{\"d\":{\"a\":0,\"c\":\"liveHeartBeat\",\"biz\":\"room\",\"b\":\"eyJyb29tSWQiOiI1NzA0MDk1MjgxNjI4NjMxNjkiLCJyb29tVHlwZSI6IkxJVkUiLCJjb21tYW5kIjoxLCJjdXN0b21EYXRhIjoie1widHlwZVwiOlwidmlld2VyX2hlYXJ0XCIsXCJwcmlvcml0eVwiOjAsXCJwcm9maWxlXCI6e1wibmlja25hbWVcIjpcIlwiLFwiYXZhdGFyXCI6XCJcIixcInVzZXJfaWRcIjpcIjZhODA4MjQ5MDAwMDAwMDAxMzAzMWMwOVwiLFwicm9sZVwiOjB9LFwic291cmNlXCI6XCJ3ZWJfbGl2ZVwiLFwiZGVzY1wiOlwiXCJ9In0=\",\"e\":{},\"s\":\"rrmp.o.l\"}}}",
+    "{\"v\":1,\"t\":2,\"m\":\"191e43fdc4d71a-1a005fd0132\",\"b\":{\"d\":{\"a\":1,\"s\":6,\"b\":{}}}}",
+    "{\"v\":1,\"t\":2,\"m\":\"ee5302f6089a-1a005fd03b9\",\"b\":{\"d\":{\"a\":1,\"s\":6,\"b\":{}}}}",
+    "{\"v\":1,\"t\":2,\"m\":\"15c183fcf6b80d-1a005fd07a8\",\"b\":{\"d\":{\"a\":1,\"s\":6,\"b\":{}}}}",
+    "{\"v\":1,\"t\":2,\"m\":\"1dcfacfe5bc778-1a005fd14bf\",\"b\":{\"d\":{\"a\":1,\"s\":6,\"b\":{}}}}"
+  ],
+  "handshake_recv": [
+    "{\"v\":1,\"t\":2,\"m\":\"13610d8f75dcd6-1a005fcfb12\",\"b\":{\"a\":{\"b\":{\"socketId\":\"socket#00163efffe194c28000000010c44e703c228bedd78712abf5870efae#prod#rwp\",\"time\":1786806860971},\"c\":0,\"m\":\"success\"}}}",
+    "{\"v\":1,\"t\":2,\"m\":\"4307aa6ab8e3a-1a005fcfd24\",\"b\":{\"a\":{\"c\":0,\"m\":\"success\"}}}",
+    "{\"v\":1,\"t\":2,\"m\":\"14c2ade6084c6c-1a005fcfd3f\",\"b\":{\"a\":{\"c\":0,\"m\":\"success\"}}}",
+    "{\"v\":1,\"t\":4,\"m\":\"0a513b13178680686114379941\",\"b\":{\"d\":{\"a\":0,\"b\":[{\"d\":\"eyJjb21tYW5kIjoxLCJjdXN0b21EYXRhIjoie1widHlwZVwiOlwiYXVkaWVuY2Vfam9pbl92MlwiLFwiY3VycmVudF90aW1lXCI6MTc4NjgwNjg2MTA4NSxcInByb2ZpbGVcIjp7XCJhdmF0YXJcIjpcImh0dHBzOi8vc25zLWF2YXRhci1xYy54aHNjZG4uY29tL2F2YXRhci82NGE1NDUwMDA2ODE2YjgxOWQ2YzFhZWMuanBnP2ltYWdlVmlldzIvMi93LzgwL2Zvcm1hdC9qcGdcIixcIm5pY2tuYW1lXCI6XCJJbnplclwiLFwicm9sZVwiOjAsXCJ1c2VyX2lkXCI6XCI1YWE5ZDg0YjExYmUxMDVmYmM5YjgxNTNcIixcImZvbGxvd19zdGF0dXNcIjowfSxcInNvdXJjZVwiOlwic2xpZGVcIixcInByZV9zb3VyY2VcIjpcImxpdmVyb29tX2NhcmRfZmVlZFwifSIsIm1zZ0lkIjoiMTQwNTkzMjYzNDc0NDAzMzI4MCIsInByaW9yaXR5IjoxLCJyb29tSWQiOiI1NzA0MDk1MjgxNjI4NjMxNjkiLCJyb29tVHlwZSI6IkxJVkUiLCJ0cyI6MTc4NjgwNjg2MTEzNywidXVpZCI6IjUzMjg5OWY1LTZjNGEtNDQ3YS04Y2Q1LTRiMGQ2MjhjMjNlOSJ9\",\"e\":{},\"m\":\"1405932634744033280\"}],\"biz\":\"room\",\"t\":1786806861143}}}",
+    "{\"v\":1,\"t\":4,\"m\":\"0a513b13178680686141688621\",\"b\":{\"d\":{\"a\":0,\"b\":[{\"d\":\"eyJjb21tYW5kIjoxLCJjdXN0b21EYXRhIjoie1widHlwZVwiOlwicHJhaXNlXCIsXCJjdXJyZW50X3RpbWVcIjoxNzg2ODA2ODYxMzU1LFwicHJvZmlsZVwiOntcInVzZXJfaWRcIjpcIjVmODViNzFmMDAwMDAwMDAwMTAwMWFiOVwiLFwicm9sZVwiOjAsXCJmb2xsb3dfc3RhdHVzXCI6MH0sXCJwcmFpc2VfaW5mb1wiOntcImNvdW50XCI6NH19IiwibXNnSWQiOiIxNDA1OTMyNjM2MDI4NjYxNzYwIiwicHJpb3JpdHkiOjIsInJvb21JZCI6IjU3MDQwOTUyODE2Mjg2MzE2OSIsInJvb21UeXBlIjoiTElWRSIsInRzIjoxNzg2ODA2ODYxNDExLCJ1dWlkIjoiMDZlNmVlZTUtMDcwYy00MTU0LWJlM2MtY2NmYjU1YmU2MWYzIn0=\",\"e\":{},\"m\":\"1405932636028661760\"}],\"biz\":\"room\",\"t\":1786806861416}}}",
+    "{\"v\":1,\"t\":4,\"m\":\"0a513b13178680686146910111\",\"b\":{\"d\":{\"a\":0,\"b\":[{\"d\":\"eyJjb21tYW5kIjoxLCJjdXN0b21EYXRhIjoie1widHlwZVwiOlwiZmFuc2dyb3VwX2pvaW5fcm9vbV9lZmZlY3RcIixcImN1cnJlbnRfdGltZVwiOjE3ODY4MDY4NjE0MTcsXCJpbWdcIjp7XCJiYWNrZ3JvdW5kX2ltZ1wiOlwiXCJ9LFwidGV4dFwiOntcInBvc3RmaXhcIjpcIuadpeS6hlwifSxcInVzZXJfaW5mb1wiOntcInVzZXJfaWRcIjpcIjVlNDRlNTI1MDAwMDAwMDAwMTAwYmQ2ZFwiLFwibmlja25hbWVcIjpcInl5eTEyMjlcIixcImF2YXRhclwiOlwiaHR0cHM6Ly9zbnMtYXZhdGFyLXFjLnhoc2Nkbi5jb20vYXZhdGFyLzEwNDBnMmpvMzIzcjE3Nm5ybmEwZzVuaTRza2lnOWZiZDNvM3Q0NG8/aW1hZ2VWaWV3Mi8yL3cvMTIwL2Zvcm1hdC9qcGdcIixcImZhbnNfbGV2ZWxcIjoxNSxcImludGltYXRlX25hbWVcIjpcIuiQjOaWsOeyiVwifX0iLCJtc2dJZCI6IjE0MDU5MzI2MzYxMzY5Mzk1MjAiLCJwcmlvcml0eSI6Miwicm9vbUlkIjoiNTcwNDA5NTI4MTYyODYzMTY5Iiwicm9vbVR5cGUiOiJMSVZFIiwidHMiOjE3ODY4MDY4NjE0NjQsInV1aWQiOiJiOTFjMWZiZi1iNzZkLTRiYjMtODI3Yy0xZDg2NzE4OWUxYzIifQ==\",\"e\":{},\"m\":\"1405932636136939520\"}],\"biz\":\"room\",\"t\":1786806861469}}}"
+  ],
+  "danmaku_samples": [
+    {
+      "decoded": {
+        "command": 1,
+        "customData": "{\"type\":\"audience_join_v2\",\"current_time\":1786806861085,\"profile\":{\"avatar\":\"https://sns-avatar-qc.xhscdn.com/avatar/64a5450006816b819d6c1aec.jpg?imageView2/2/w/80/format/jpg\",\"nickname\":\"Inzer\",\"role\":0,\"user_id\":\"5aa9d84b11be105fbc9b8153\",\"follow_status\":0},\"source\":\"slide\",\"pre_source\":\"liveroom_card_feed\"}",
+        "msgId": "1405932634744033280",
+        "priority": 1,
+        "roomId": "570409528162863169",
+        "roomType": "LIVE",
+        "ts": 1786806861137,
+        "uuid": "532899f5-6c4a-447a-8cd5-4b0d628c23e9"
+      },
+      "customData": {
+        "type": "audience_join_v2",
+        "current_time": 1786806861085,
+        "profile": {
+          "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/64a5450006816b819d6c1aec.jpg?imageView2/2/w/80/format/jpg",
+          "nickname": "Inzer",
+          "role": 0,
+          "user_id": "5aa9d84b11be105fbc9b8153",
+          "follow_status": 0
+        },
+        "source": "slide",
+        "pre_source": "liveroom_card_feed"
+      }
+    },
+    {
+      "decoded": {
+        "command": 1,
+        "customData": "{\"type\":\"praise\",\"current_time\":1786806861355,\"profile\":{\"user_id\":\"5f85b71f0000000001001ab9\",\"role\":0,\"follow_status\":0},\"praise_info\":{\"count\":4}}",
+        "msgId": "1405932636028661760",
+        "priority": 2,
+        "roomId": "570409528162863169",
+        "roomType": "LIVE",
+        "ts": 1786806861411,
+        "uuid": "06e6eee5-070c-4154-be3c-ccfb55be61f3"
+      },
+      "customData": {
+        "type": "praise",
+        "current_time": 1786806861355,
+        "profile": {
+          "user_id": "5f85b71f0000000001001ab9",
+          "role": 0,
+          "follow_status": 0
+        },
+        "praise_info": {
+          "count": 4
+        }
+      }
+    },
+    {
+      "decoded": {
+        "command": 1,
+        "customData": "{\"type\":\"fansgroup_join_room_effect\",\"current_time\":1786806861417,\"img\":{\"background_img\":\"\"},\"text\":{\"postfix\":\"来了\"},\"user_info\":{\"user_id\":\"5e44e525000000000100bd6d\",\"nickname\":\"yyy1229\",\"avatar\":\"https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo323r176nrna0g5ni4skig9fbd3o3t44o?imageView2/2/w/120/format/jpg\",\"fans_level\":15,\"intimate_name\":\"萌新粉\"}}",
+        "msgId": "1405932636136939520",
+        "priority": 2,
+        "roomId": "570409528162863169",
+        "roomType": "LIVE",
+        "ts": 1786806861464,
+        "uuid": "b91c1fbf-b76d-4bb3-827c-1d867189e1c2"
+      },
+      "customData": {
+        "type": "fansgroup_join_room_effect",
+        "current_time": 1786806861417,
+        "img": {
+          "background_img": ""
+        },
+        "text": {
+          "postfix": "来了"
+        },
+        "user_info": {
+          "user_id": "5e44e525000000000100bd6d",
+          "nickname": "yyy1229",
+          "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo323r176nrna0g5ni4skig9fbd3o3t44o?imageView2/2/w/120/format/jpg",
+          "fans_level": 15,
+          "intimate_name": "萌新粉"
+        }
+      }
+    },
+    {
+      "decoded": {
+        "command": 1,
+        "customData": "{\"type\":\"audience_join_v2\",\"current_time\":1786806861421,\"profile\":{\"avatar\":\"https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31qlqvmgj7u005pgt498gu2q072fdrcg?imageView2/2/w/80/format/jpg\",\"nickname\":\"晴天\",\"role\":0,\"user_id\":\"661d22510000000003030b40\",\"fans_group\":{\"fans_level\":7,\"active_fans\":true,\"intimate_name\":\"亲密粉\"},\"follow_status\":3},\"source\":\"floating_window\",\"pre_source\":\"\"}",
+        "msgId": "1405932636230180864",
+        "priority": 1,
+        "roomId": "570409528162863169",
+        "roomType": "LIVE",
+        "ts": 1786806861501,
+        "uuid": "a86bf6d2-5638-4d7b-a1f8-64200d5172e0"
+      },
+      "customData": {
+        "type": "audience_join_v2",
+        "current_time": 1786806861421,
+        "profile": {
+          "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31qlqvmgj7u005pgt498gu2q072fdrcg?imageView2/2/w/80/format/jpg",
+          "nickname": "晴天",
+          "role": 0,
+          "user_id": "661d22510000000003030b40",
+          "fans_group": {
+            "fans_level": 7,
+            "active_fans": true,
+            "intimate_name": "亲密粉"
+          },
+          "follow_status": 3
+        },
+        "source": "floating_window",
+        "pre_source": ""
+      }
+    },
+    {
+      "decoded": {
+        "command": 1,
+        "customData": "{\"type\":\"audience_join_v2\",\"current_time\":1786806861545,\"profile\":{\"avatar\":\"https://sns-avatar-qc.xhscdn.com/avatar/645b6abf2e368555521befcc.jpg?imageView2/2/w/80/format/jpg\",\"nickname\":\"小红薯6A3B474A\",\"role\":0,\"user_id\":\"6a3a41a00000000001004001\",\"follow_status\":0},\"source\":\"recommend_live_end\",\"pre_source\":\"follow_feed\"}",
+        "msgId": "1405932636666216448",
+        "priority": 1,
+        "roomId": "570409528162863169",
+        "roomType": "LIVE",
+        "ts": 1786806861594,
+        "uuid": "6f66b773-f950-45eb-8e14-b249642508af"
+      },
+      "customData": {
+        "type": "audience_join_v2",
+        "current_time": 1786806861545,
+        "profile": {
+          "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/645b6abf2e368555521befcc.jpg?imageView2/2/w/80/format/jpg",
+          "nickname": "小红薯6A3B474A",
+          "role": 0,
+          "user_id": "6a3a41a00000000001004001",
+          "follow_status": 0
+        },
+        "source": "recommend_live_end",
+        "pre_source": "follow_feed"
+      }
+    },
+    {
+      "decoded": {
+        "command": 1,
+        "customData": "{\"type\":\"gift_dock_and_effect\",\"current_time\":1786806861365,\"room_info\":{\"id\":570409528162863169,\"host_id\":\"64ccb022000000000e0241a5\"},\"send_user_info\":{\"id\":\"649cddab0000000025035f4e\",\"avatar\":\"https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo322sqn7bhna6g5p4srmlpenqe7i48j98?imageView2/2/w/120/format/jpg\",\"nick_name\":\"江南雨\",\"role\":0,\"follow_status\":0},\"receive_user_info\":{\"id\":\"64ccb022000000000e0241a5\",\"avatar\":\"https://sns-avatar-qc.xhscdn.com/avatar/7309931d-c3f7-3868-a8b4-3be172deb890?imageView2/2/w/120/format/jpg\",\"nick_name\":\"活不腻来相亲\",\"role\":0,\"follow_status\":0},\"base_gift_info\":{\"id\":137925940106684781,\"name\":\"比心\",\"icon\":\"https://xhslive-sfg.xhscdn.com/cny_resource/104102t03202h5t916e06ifre80jp60000000000vbd46k\",\"type\":0,\"coins\":1,\"show_type\":0,\"gift_level\":1},\"gift_action_info\":{\"gift_id\":137925940106684781,\"count\":1,\"transaction_id\":\"649cddab0000000025035f4e_137925940106684781_1786806861000\",\"comb_key\":\"649cddab0000000025035f4e_570409528162863169_137925940106684781_1786806858310_64ccb022000000000e0241a5\",\"comb_count\":4,\"show_style\":0,\"show_priority\":1,\"gift_extra_info\":{\"is_group_live_pk\":\"false\",\"pre_source\":\"\",\"team_id\":\"\",\"source\":\"note_detail\",\"send_time\":\"1786806861188\",\"is_group_live\":\"false\",\"gift_name\":\"比心\",\"send_time_from_server\":\"1786806861271\",\"is_mic\":\"true\"}},\"gift_effect_info\":{\"gift_effects\":[]},\"show_style_info\":{\"style\":\"default\",\"extra_info\":{}}}",
+        "msgId": "1405932636889792512",
+        "priority": 3,
+        "roomId": "570409528162863169",
+        "roomType": "LIVE",
+        "ts": 1786806861605,
+        "uuid": "9fe37962-08d4-4fd1-a284-6d1195211f5c"
+      },
+      "customData": {
+        "type": "gift_dock_and_effect",
+        "current_time": 1786806861365,
+        "room_info": {
+          "id": 570409528162863169,
+          "host_id": "64ccb022000000000e0241a5"
+        },
+        "send_user_info": {
+          "id": "649cddab0000000025035f4e",
+          "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo322sqn7bhna6g5p4srmlpenqe7i48j98?imageView2/2/w/120/format/jpg",
+          "nick_name": "江南雨",
+          "role": 0,
+          "follow_status": 0
+        },
+        "receive_user_info": {
+          "id": "64ccb022000000000e0241a5",
+          "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/7309931d-c3f7-3868-a8b4-3be172deb890?imageView2/2/w/120/format/jpg",
+          "nick_name": "活不腻来相亲",
+          "role": 0,
+          "follow_status": 0
+        },
+        "base_gift_info": {
+          "id": 137925940106684781,
+          "name": "比心",
+          "icon": "https://xhslive-sfg.xhscdn.com/cny_resource/104102t03202h5t916e06ifre80jp60000000000vbd46k",
+          "type": 0,
+          "coins": 1,
+          "show_type": 0,
+          "gift_level": 1
+        },
+        "gift_action_info": {
+          "gift_id": 137925940106684781,
+          "count": 1,
+          "transaction_id": "649cddab0000000025035f4e_137925940106684781_1786806861000",
+          "comb_key": "649cddab0000000025035f4e_570409528162863169_137925940106684781_1786806858310_64ccb022000000000e0241a5",
+          "comb_count": 4,
+          "show_style": 0,
+          "show_priority": 1,
+          "gift_extra_info": {
+            "is_group_live_pk": "false",
+            "pre_source": "",
+            "team_id": "",
+            "source": "note_detail",
+            "send_time": "1786806861188",
+            "is_group_live": "false",
+            "gift_name": "比心",
+            "send_time_from_server": "1786806861271",
+            "is_mic": "true"
+          }
+        },
+        "gift_effect_info": {
+          "gift_effects": []
+        },
+        "show_style_info": {
+          "style": "default",
+          "extra_info": {}
+        }
+      }
+    },
+    {
+      "decoded": {
+        "command": 1,
+        "customData": "{\"type\":\"gift_dock_and_effect\",\"current_time\":1786806861619,\"room_info\":{\"id\":570409528162863169,\"host_id\":\"64ccb022000000000e0241a5\"},\"send_user_info\":{\"id\":\"649cddab0000000025035f4e\",\"avatar\":\"https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo322sqn7bhna6g5p4srmlpenqe7i48j98?imageView2/2/w/120/format/jpg\",\"nick_name\":\"江南雨\",\"role\":0,\"follow_status\":0},\"receive_user_info\":{\"id\":\"64ccb022000000000e0241a5\",\"avatar\":\"https://sns-avatar-qc.xhscdn.com/avatar/7309931d-c3f7-3868-a8b4-3be172deb890?imageView2/2/w/120/format/jpg\",\"nick_name\":\"活不腻来相亲\",\"role\":0,\"follow_status\":0},\"base_gift_info\":{\"id\":137925940106684781,\"name\":\"比心\",\"icon\":\"https://xhslive-sfg.xhscdn.com/cny_resource/104102t03202h5t916e06ifre80jp60000000000vbd46k\",\"type\":0,\"coins\":1,\"show_type\":0,\"gift_level\":1},\"gift_action_info\":{\"gift_id\":137925940106684781,\"count\":1,\"transaction_id\":\"649cddab0000000025035f4e_137925940106684781_1786806861317\",\"comb_key\":\"649cddab0000000025035f4e_570409528162863169_137925940106684781_1786806858310_64ccb022000000000e0241a5\",\"comb_count\":5,\"show_style\":0,\"show_priority\":1,\"gift_extra_info\":{\"is_group_live_pk\":\"false\",\"pre_source\":\"\",\"source\":\"note_detail\",\"team_id\":\"\",\"send_time\":\"1786806861503\",\"is_group_live\":\"false\",\"gift_name\":\"比心\",\"is_mic\":\"true\",\"send_time_from_server\":\"1786806861529\"}},\"gift_effect_info\":{\"gift_effects\":[]},\"show_style_info\":{\"style\":\"default\",\"extra_info\":{}}}",
+        "msgId": "1405932638195359744",
+        "priority": 3,
+        "roomId": "570409528162863169",
+        "roomType": "LIVE",
+        "ts": 1786806861925,
+        "uuid": "75664b43-29f4-4f87-b65e-c1c7ca5d4d64"
+      },
+      "customData": {
+        "type": "gift_dock_and_effect",
+        "current_time": 1786806861619,
+        "room_info": {
+          "id": 570409528162863169,
+          "host_id": "64ccb022000000000e0241a5"
+        },
+        "send_user_info": {
+          "id": "649cddab0000000025035f4e",
+          "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo322sqn7bhna6g5p4srmlpenqe7i48j98?imageView2/2/w/120/format/jpg",
+          "nick_name": "江南雨",
+          "role": 0,
+          "follow_status": 0
+        },
+        "receive_user_info": {
+          "id": "64ccb022000000000e0241a5",
+          "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/7309931d-c3f7-3868-a8b4-3be172deb890?imageView2/2/w/120/format/jpg",
+          "nick_name": "活不腻来相亲",
+          "role": 0,
+          "follow_status": 0
+        },
+        "base_gift_info": {
+          "id": 137925940106684781,
+          "name": "比心",
+          "icon": "https://xhslive-sfg.xhscdn.com/cny_resource/104102t03202h5t916e06ifre80jp60000000000vbd46k",
+          "type": 0,
+          "coins": 1,
+          "show_type": 0,
+          "gift_level": 1
+        },
+        "gift_action_info": {
+          "gift_id": 137925940106684781,
+          "count": 1,
+          "transaction_id": "649cddab0000000025035f4e_137925940106684781_1786806861317",
+          "comb_key": "649cddab0000000025035f4e_570409528162863169_137925940106684781_1786806858310_64ccb022000000000e0241a5",
+          "comb_count": 5,
+          "show_style": 0,
+          "show_priority": 1,
+          "gift_extra_info": {
+            "is_group_live_pk": "false",
+            "pre_source": "",
+            "source": "note_detail",
+            "team_id": "",
+            "send_time": "1786806861503",
+            "is_group_live": "false",
+            "gift_name": "比心",
+            "is_mic": "true",
+            "send_time_from_server": "1786806861529"
+          }
+        },
+        "gift_effect_info": {
+          "gift_effects": []
+        },
+        "show_style_info": {
+          "style": "default",
+          "extra_info": {}
+        }
+      }
+    },
+    {
+      "decoded": {
+        "command": 1,
+        "customData": "{\"type\":\"gift_dock_and_effect\",\"current_time\":1786806861738,\"room_info\":{\"id\":570409528162863169,\"host_id\":\"64ccb022000000000e0241a5\"},\"send_user_info\":{\"id\":\"649cddab0000000025035f4e\",\"avatar\":\"https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo322sqn7bhna6g5p4srmlpenqe7i48j98?imageView2/2/w/120/format/jpg\",\"nick_name\":\"江南雨\",\"role\":0,\"follow_status\":0},\"receive_user_info\":{\"id\":\"64ccb022000000000e0241a5\",\"avatar\":\"https://sns-avatar-qc.xhscdn.com/avatar/7309931d-c3f7-3868-a8b4-3be172deb890?imageView2/2/w/120/format/jpg\",\"nick_name\":\"活不腻来相亲\",\"role\":0,\"follow_status\":0},\"base_gift_info\":{\"id\":137925940106684781,\"name\":\"比心\",\"icon\":\"https://xhslive-sfg.xhscdn.com/cny_resource/104102t03202h5t916e06ifre80jp60000000000vbd46k\",\"type\":0,\"coins\":1,\"show_type\":0,\"gift_level\":1},\"gift_action_info\":{\"gift_id\":137925940106684781,\"count\":1,\"transaction_id\":\"649cddab0000000025035f4e_137925940106684781_1786806861443\",\"comb_key\":\"649cddab0000000025035f4e_570409528162863169_137925940106684781_1786806858310_64ccb022000000000e0241a5\",\"comb_count\":6,\"show_style\":0,\"show_priority\":1,\"gift_extra_info\":{\"pre_source\":\"\",\"is_group_live_pk\":\"false\",\"team_id\":\"\",\"source\":\"note_detail\",\"send_time\":\"1786806861630\",\"is_group_live\":\"false\",\"gift_name\":\"比心\",\"is_mic\":\"true\",\"send_time_from_server\":\"1786806861656\"}},\"gift_effect_info\":{\"gift_effects\":[]},\"show_style_info\":{\"style\":\"default\",\"extra_info\":{}}}",
+        "msgId": "1405932638515757057",
+        "priority": 3,
+        "roomId": "570409528162863169",
+        "roomType": "LIVE",
+        "ts": 1786806862002,
+        "uuid": "09f76b2a-2e48-4d45-bac4-c4fff1e7d020"
+      },
+      "customData": {
+        "type": "gift_dock_and_effect",
+        "current_time": 1786806861738,
+        "room_info": {
+          "id": 570409528162863169,
+          "host_id": "64ccb022000000000e0241a5"
+        },
+        "send_user_info": {
+          "id": "649cddab0000000025035f4e",
+          "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo322sqn7bhna6g5p4srmlpenqe7i48j98?imageView2/2/w/120/format/jpg",
+          "nick_name": "江南雨",
+          "role": 0,
+          "follow_status": 0
+        },
+        "receive_user_info": {
+          "id": "64ccb022000000000e0241a5",
+          "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/7309931d-c3f7-3868-a8b4-3be172deb890?imageView2/2/w/120/format/jpg",
+          "nick_name": "活不腻来相亲",
+          "role": 0,
+          "follow_status": 0
+        },
+        "base_gift_info": {
+          "id": 137925940106684781,
+          "name": "比心",
+          "icon": "https://xhslive-sfg.xhscdn.com/cny_resource/104102t03202h5t916e06ifre80jp60000000000vbd46k",
+          "type": 0,
+          "coins": 1,
+          "show_type": 0,
+          "gift_level": 1
+        },
+        "gift_action_info": {
+          "gift_id": 137925940106684781,
+          "count": 1,
+          "transaction_id": "649cddab0000000025035f4e_137925940106684781_1786806861443",
+          "comb_key": "649cddab0000000025035f4e_570409528162863169_137925940106684781_1786806858310_64ccb022000000000e0241a5",
+          "comb_count": 6,
+          "show_style": 0,
+          "show_priority": 1,
+          "gift_extra_info": {
+            "pre_source": "",
+            "is_group_live_pk": "false",
+            "team_id": "",
+            "source": "note_detail",
+            "send_time": "1786806861630",
+            "is_group_live": "false",
+            "gift_name": "比心",
+            "is_mic": "true",
+            "send_time_from_server": "1786806861656"
+          }
+        },
+        "gift_effect_info": {
+          "gift_effects": []
+        },
+        "show_style_info": {
+          "style": "default",
+          "extra_info": {}
+        }
+      }
+    },
+    {
+      "decoded": {
+        "command": 1,
+        "customData": "{\"type\":\"praise\",\"current_time\":1786806861975,\"profile\":{\"user_id\":\"5f85b71f0000000001001ab9\",\"role\":0,\"follow_status\":0},\"praise_info\":{\"count\":3}}",
+        "msgId": "1405932638568656896",
+        "priority": 2,
+        "roomId": "570409528162863169",
+        "roomType": "LIVE",
+        "ts": 1786806862053,
+        "uuid": "a7ba3813-65d4-4b1e-9041-fc1b185a4a63"
+      },
+      "customData": {
+        "type": "praise",
+        "current_time": 1786806861975,
+        "profile": {
+          "user_id": "5f85b71f0000000001001ab9",
+          "role": 0,
+          "follow_status": 0
+        },
+        "praise_info": {
+          "count": 3
+        }
+      }
+    },
+    {
+      "decoded": {
+        "command": 1,
+        "customData": "{\"type\":\"audience_join_v2\",\"current_time\":1786806862039,\"profile\":{\"avatar\":\"https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31tpibl6e6u5g5ounji1pt9vfmn7r2qo?imageView2/2/w/80/format/jpg\",\"nickname\":\"✨幸运✨\",\"role\":0,\"user_id\":\"63d79c83000000002702a7ef\",\"follow_status\":0},\"source\":\"slide\",\"pre_source\":\"explore_feed_card\"}",
+        "msgId": "1405932638741471232",
+        "priority": 1,
+        "roomId": "570409528162863169",
+        "roomType": "LIVE",
+        "ts": 1786806862094,
+        "uuid": "cf64103b-2378-4510-a407-e4cb58f0ed2f"
+      },
+      "customData": {
+        "type": "audience_join_v2",
+        "current_time": 1786806862039,
+        "profile": {
+          "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31tpibl6e6u5g5ounji1pt9vfmn7r2qo?imageView2/2/w/80/format/jpg",
+          "nickname": "✨幸运✨",
+          "role": 0,
+          "user_id": "63d79c83000000002702a7ef",
+          "follow_status": 0
+        },
+        "source": "slide",
+        "pre_source": "explore_feed_card"
+      }
+    },
+    {
+      "decoded": {
+        "command": 1,
+        "customData": "{\"type\":\"gift_dock_and_effect\",\"current_time\":1786806861983,\"room_info\":{\"id\":570409528162863169,\"host_id\":\"64ccb022000000000e0241a5\"},\"send_user_info\":{\"id\":\"649cddab0000000025035f4e\",\"avatar\":\"https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo322sqn7bhna6g5p4srmlpenqe7i48j98?imageView2/2/w/120/format/jpg\",\"nick_name\":\"江南雨\",\"role\":0,\"follow_status\":0},\"receive_user_info\":{\"id\":\"64ccb022000000000e0241a5\",\"avatar\":\"https://sns-avatar-qc.xhscdn.com/avatar/7309931d-c3f7-3868-a8b4-3be172deb890?imageView2/2/w/120/format/jpg\",\"nick_name\":\"活不腻来相亲\",\"role\":0,\"follow_status\":0},\"base_gift_info\":{\"id\":137925940106684781,\"name\":\"比心\",\"icon\":\"https://xhslive-sfg.xhscdn.com/cny_resource/104102t03202h5t916e06ifre80jp60000000000vbd46k\",\"type\":0,\"coins\":1,\"show_type\":0,\"gift_level\":1},\"gift_action_info\":{\"gift_id\":137925940106684781,\"count\":1,\"transaction_id\":\"649cddab0000000025035f4e_137925940106684781_1786806861686\",\"comb_key\":\"649cddab0000000025035f4e_570409528162863169_137925940106684781_1786806858310_64ccb022000000000e0241a5\",\"comb_count\":7,\"show_style\":0,\"show_priority\":1,\"gift_extra_info\":{\"is_group_live_pk\":\"false\",\"pre_source\":\"\",\"team_id\":\"\",\"source\":\"note_detail\",\"send_time\":\"1786806861873\",\"is_group_live\":\"false\",\"gift_name\":\"比心\",\"is_mic\":\"true\",\"send_time_from_server\":\"1786806861899\"}},\"gift_effect_info\":{\"gift_effects\":[]},\"show_style_info\":{\"style\":\"default\",\"extra_info\":{}}}",
+        "msgId": "1405932639266144258",
+        "priority": 3,
+        "roomId": "570409528162863169",
+        "roomType": "LIVE",
+        "ts": 1786806862175,
+        "uuid": "f94851c8-5c46-403c-b826-8b9e980c8763"
+      },
+      "customData": {
+        "type": "gift_dock_and_effect",
+        "current_time": 1786806861983,
+        "room_info": {
+          "id": 570409528162863169,
+          "host_id": "64ccb022000000000e0241a5"
+        },
+        "send_user_info": {
+          "id": "649cddab0000000025035f4e",
+          "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo322sqn7bhna6g5p4srmlpenqe7i48j98?imageView2/2/w/120/format/jpg",
+          "nick_name": "江南雨",
+          "role": 0,
+          "follow_status": 0
+        },
+        "receive_user_info": {
+          "id": "64ccb022000000000e0241a5",
+          "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/7309931d-c3f7-3868-a8b4-3be172deb890?imageView2/2/w/120/format/jpg",
+          "nick_name": "活不腻来相亲",
+          "role": 0,
+          "follow_status": 0
+        },
+        "base_gift_info": {
+          "id": 137925940106684781,
+          "name": "比心",
+          "icon": "https://xhslive-sfg.xhscdn.com/cny_resource/104102t03202h5t916e06ifre80jp60000000000vbd46k",
+          "type": 0,
+          "coins": 1,
+          "show_type": 0,
+          "gift_level": 1
+        },
+        "gift_action_info": {
+          "gift_id": 137925940106684781,
+          "count": 1,
+          "transaction_id": "649cddab0000000025035f4e_137925940106684781_1786806861686",
+          "comb_key": "649cddab0000000025035f4e_570409528162863169_137925940106684781_1786806858310_64ccb022000000000e0241a5",
+          "comb_count": 7,
+          "show_style": 0,
+          "show_priority": 1,
+          "gift_extra_info": {
+            "is_group_live_pk": "false",
+            "pre_source": "",
+            "team_id": "",
+            "source": "note_detail",
+            "send_time": "1786806861873",
+            "is_group_live": "false",
+            "gift_name": "比心",
+            "is_mic": "true",
+            "send_time_from_server": "1786806861899"
+          }
+        },
+        "gift_effect_info": {
+          "gift_effects": []
+        },
+        "show_style_info": {
+          "style": "default",
+          "extra_info": {}
+        }
+      }
+    },
+    {
+      "decoded": {
+        "command": 1,
+        "customData": "{\"type\":\"audience_join_v2\",\"current_time\":1786806862191,\"profile\":{\"avatar\":\"https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31in85rbf0m5g5npv6fe08toesjoafm0?imageView2/2/w/80/format/jpg\",\"nickname\":\"梅冬马\",\"role\":0,\"user_id\":\"5f3f33dc000000000100770e\",\"follow_status\":0},\"source\":\"slide\",\"pre_source\":\"explore_feed_card\"}",
+        "msgId": "1405932639453417472",
+        "priority": 1,
+        "roomId": "570409528162863169",
+        "roomType": "LIVE",
+        "ts": 1786806862265,
+        "uuid": "f1d485a7-09fc-49e3-ba6c-dcc7ad1bbe8a"
+      },
+      "customData": {
+        "type": "audience_join_v2",
+        "current_time": 1786806862191,
+        "profile": {
+          "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31in85rbf0m5g5npv6fe08toesjoafm0?imageView2/2/w/80/format/jpg",
+          "nickname": "梅冬马",
+          "role": 0,
+          "user_id": "5f3f33dc000000000100770e",
+          "follow_status": 0
+        },
+        "source": "slide",
+        "pre_source": "explore_feed_card"
+      }
+    },
+    {
+      "decoded": {
+        "command": 1,
+        "customData": "{\"type\":\"audience_join_v2\",\"current_time\":1786806862426,\"profile\":{\"avatar\":\"https://sns-avatar-qc.xhscdn.com/avatar/69c3dd5f27992200012a4899.jpg?imageView2/2/w/80/format/jpg\",\"nickname\":\"精知教育靠谱李老师\",\"role\":0,\"user_id\":\"5b94c44778d1e20001090c51\",\"follow_status\":0},\"source\":\"slide\",\"pre_source\":\"explore_feed_card\"}",
+        "msgId": "1405932640443392000",
+        "priority": 1,
+        "roomId": "570409528162863169",
+        "roomType": "LIVE",
+        "ts": 1786806862500,
+        "uuid": "d1c7d4b3-90c5-4ddd-9d0b-61847b702036"
+      },
+      "customData": {
+        "type": "audience_join_v2",
+        "current_time": 1786806862426,
+        "profile": {
+          "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/69c3dd5f27992200012a4899.jpg?imageView2/2/w/80/format/jpg",
+          "nickname": "精知教育靠谱李老师",
+          "role": 0,
+          "user_id": "5b94c44778d1e20001090c51",
+          "follow_status": 0
+        },
+        "source": "slide",
+        "pre_source": "explore_feed_card"
+      }
+    },
+    {
+      "decoded": {
+        "command": 1,
+        "customData": "{\"type\":\"praise\",\"current_time\":1786806862645,\"profile\":{\"user_id\":\"5f85b71f0000000001001ab9\",\"role\":0,\"follow_status\":0},\"praise_info\":{\"count\":3}}",
+        "msgId": "1405932641288282112",
+        "priority": 2,
+        "roomId": "570409528162863169",
+        "roomType": "LIVE",
+        "ts": 1786806862694,
+        "uuid": "7bcee852-99b9-43c9-8630-c2462df8f368"
+      },
+      "customData": {
+        "type": "praise",
+        "current_time": 1786806862645,
+        "profile": {
+          "user_id": "5f85b71f0000000001001ab9",
+          "role": 0,
+          "follow_status": 0
+        },
+        "praise_info": {
+          "count": 3
+        }
+      }
+    },
+    {
+      "decoded": {
+        "command": 1,
+        "customData": "{\"type\":\"text\",\"current_time\":1786806862704,\"source\":\"search_onebox\",\"translated\":false,\"at_users\":[],\"origin_language\":\"zh_cn\",\"commentId\":\"7674277032444974081\",\"profile\":{\"avatar\":\"https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31tnu54bbmu005pscm7r3jnr5u1tn7cg?imageView2/2/w/80/format/jpg\",\"nickname\":\"夏果酸\",\"role\":0,\"user_id\":\"678cb1f6000000000e01df65\",\"follow_status\":3},\"desc\":\"终于来女生了\",\"comment_type\":0,\"aggregate\":false,\"goods_status\":false}",
+        "msgId": "1405932642060263425",
+        "priority": 2,
+        "roomId": "570409528162863169",
+        "roomType": "LIVE",
+        "ts": 1786806862881,
+        "uuid": "1afe3b94-33a4-4b34-9f1f-d4d29650b578"
+      },
+      "customData": {
+        "type": "text",
+        "current_time": 1786806862704,
+        "source": "search_onebox",
+        "translated": false,
+        "at_users": [],
+        "origin_language": "zh_cn",
+        "commentId": "7674277032444974081",
+        "profile": {
+          "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31tnu54bbmu005pscm7r3jnr5u1tn7cg?imageView2/2/w/80/format/jpg",
+          "nickname": "夏果酸",
+          "role": 0,
+          "user_id": "678cb1f6000000000e01df65",
+          "follow_status": 3
+        },
+        "desc": "终于来女生了",
+        "comment_type": 0,
+        "aggregate": false,
+        "goods_status": false
+      }
+    },
+    {
+      "decoded": {
+        "command": 1,
+        "customData": "{\"type\":\"audience_join_v2\",\"current_time\":1786806863111,\"profile\":{\"avatar\":\"https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31o7e1t6v526g5pt01d33if10pf82igo?imageView2/2/w/80/format/jpg\",\"nickname\":\"星光🌟\",\"role\":0,\"user_id\":\"67a00b46000000000e013c20\",\"follow_status\":0},\"source\":\"slide\",\"pre_source\":\"liveroom_card_feed\"}",
+        "msgId": "1405932643437654016",
+        "priority": 1,
+        "roomId": "570409528162863169",
+        "roomType": "LIVE",
+        "ts": 1786806863193,
+        "uuid": "917e1a44-3d42-4e36-a28d-14caebb30246"
+      },
+      "customData": {
+        "type": "audience_join_v2",
+        "current_time": 1786806863111,
+        "profile": {
+          "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31o7e1t6v526g5pt01d33if10pf82igo?imageView2/2/w/80/format/jpg",
+          "nickname": "星光🌟",
+          "role": 0,
+          "user_id": "67a00b46000000000e013c20",
+          "follow_status": 0
+        },
+        "source": "slide",
+        "pre_source": "liveroom_card_feed"
+      }
+    },
+    {
+      "decoded": {
+        "command": 1,
+        "customData": "{\"type\":\"audience_join_v2\",\"current_time\":1786806863199,\"profile\":{\"avatar\":\"https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31f3cc10q6a6g5nsdm310bvb237umpd0?imageView2/2/w/80/format/jpg\",\"nickname\":\"艾弗歪歪\",\"role\":0,\"user_id\":\"5f8db0c2000000000101fd62\",\"follow_status\":0},\"source\":\"slide\",\"pre_source\":\"explore_feed_card\"}",
+        "msgId": "1405932643611078656",
+        "priority": 1,
+        "roomId": "570409528162863169",
+        "roomType": "LIVE",
+        "ts": 1786806863251,
+        "uuid": "f7a70a46-beac-4126-b3db-281eb21ebc87"
+      },
+      "customData": {
+        "type": "audience_join_v2",
+        "current_time": 1786806863199,
+        "profile": {
+          "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31f3cc10q6a6g5nsdm310bvb237umpd0?imageView2/2/w/80/format/jpg",
+          "nickname": "艾弗歪歪",
+          "role": 0,
+          "user_id": "5f8db0c2000000000101fd62",
+          "follow_status": 0
+        },
+        "source": "slide",
+        "pre_source": "explore_feed_card"
+      }
+    },
+    {
+      "decoded": {
+        "command": 1,
+        "customData": "{\"type\":\"praise\",\"current_time\":1786806863249,\"profile\":{\"user_id\":\"5f85b71f0000000001001ab9\",\"role\":0,\"follow_status\":0},\"praise_info\":{\"count\":3}}",
+        "msgId": "1405932643975626752",
+        "priority": 2,
+        "roomId": "570409528162863169",
+        "roomType": "LIVE",
+        "ts": 1786806863313,
+        "uuid": "96da555d-e3d8-41c6-97bd-1a22b92b1c39"
+      },
+      "customData": {
+        "type": "praise",
+        "current_time": 1786806863249,
+        "profile": {
+          "user_id": "5f85b71f0000000001001ab9",
+          "role": 0,
+          "follow_status": 0
+        },
+        "praise_info": {
+          "count": 3
+        }
+      }
+    },
+    {
+      "decoded": {
+        "command": 1,
+        "customData": "{\"type\":\"audience_join_v2\",\"current_time\":1786806863283,\"profile\":{\"avatar\":\"https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo322ondk6en6005nvf6k40bk5kf5rc8hg?imageView2/2/w/80/format/jpg\",\"nickname\":\"喬安\",\"role\":0,\"user_id\":\"5fef3508000000000101d0b4\",\"follow_status\":0},\"source\":\"slide\",\"pre_source\":\"explore_feed_card\"}",
+        "msgId": "1405932644035969024",
+        "priority": 1,
+        "roomId": "570409528162863169",
+        "roomType": "LIVE",
+        "ts": 1786806863355,
+        "uuid": "d1bb8b77-c45d-4c62-9ebf-42b53c263ae1"
+      },
+      "customData": {
+        "type": "audience_join_v2",
+        "current_time": 1786806863283,
+        "profile": {
+          "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo322ondk6en6005nvf6k40bk5kf5rc8hg?imageView2/2/w/80/format/jpg",
+          "nickname": "喬安",
+          "role": 0,
+          "user_id": "5fef3508000000000101d0b4",
+          "follow_status": 0
+        },
+        "source": "slide",
+        "pre_source": "explore_feed_card"
+      }
+    },
+    {
+      "decoded": {
+        "command": 1,
+        "customData": "{\"type\":\"gift_dock_and_effect\",\"current_time\":1786806863489,\"room_info\":{\"id\":570409528162863169,\"host_id\":\"64ccb022000000000e0241a5\"},\"send_user_info\":{\"id\":\"649cddab0000000025035f4e\",\"avatar\":\"https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo322sqn7bhna6g5p4srmlpenqe7i48j98?imageView2/2/w/120/format/jpg\",\"nick_name\":\"江南雨\",\"role\":0,\"follow_status\":0},\"receive_user_info\":{\"id\":\"64ccb022000000000e0241a5\",\"avatar\":\"https://sns-avatar-qc.xhscdn.com/avatar/7309931d-c3f7-3868-a8b4-3be172deb890?imageView2/2/w/120/format/jpg\",\"nick_name\":\"活不腻来相亲\",\"role\":0,\"follow_status\":0},\"base_gift_info\":{\"id\":137925940106684781,\"name\":\"比心\",\"icon\":\"https://xhslive-sfg.xhscdn.com/cny_resource/104102t03202h5t916e06ifre80jp60000000000vbd46k\",\"type\":0,\"coins\":1,\"show_type\":0,\"gift_level\":1},\"gift_action_info\":{\"gift_id\":137925940106684781,\"count\":1,\"transaction_id\":\"649cddab0000000025035f4e_137925940106684781_1786806863141\",\"comb_key\":\"649cddab0000000025035f4e_570409528162863169_137925940106684781_1786806858310_64ccb022000000000e0241a5\",\"comb_count\":10,\"show_style\":0,\"show_priority\":1,\"gift_extra_info\":{\"pre_source\":\"\",\"is_group_live_pk\":\"false\",\"team_id\":\"\",\"source\":\"note_detail\",\"send_time\":\"1786806863329\",\"is_group_live\":\"false\",\"gift_name\":\"比心\",\"send_time_from_server\":\"1786806863405\",\"is_mic\":\"true\"}},\"gift_effect_info\":{\"gift_effects\":[]},\"show_style_info\":{\"style\":\"default\",\"extra_info\":{}}}",
+        "msgId": "1405932645180653568",
+        "priority": 3,
+        "roomId": "570409528162863169",
+        "roomType": "LIVE",
+        "ts": 1786806863582,
+        "uuid": "aff1fce6-8b77-4218-b106-9769a229cc29"
+      },
+      "customData": {
+        "type": "gift_dock_and_effect",
+        "current_time": 1786806863489,
+        "room_info": {
+          "id": 570409528162863169,
+          "host_id": "64ccb022000000000e0241a5"
+        },
+        "send_user_info": {
+          "id": "649cddab0000000025035f4e",
+          "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo322sqn7bhna6g5p4srmlpenqe7i48j98?imageView2/2/w/120/format/jpg",
+          "nick_name": "江南雨",
+          "role": 0,
+          "follow_status": 0
+        },
+        "receive_user_info": {
+          "id": "64ccb022000000000e0241a5",
+          "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/7309931d-c3f7-3868-a8b4-3be172deb890?imageView2/2/w/120/format/jpg",
+          "nick_name": "活不腻来相亲",
+          "role": 0,
+          "follow_status": 0
+        },
+        "base_gift_info": {
+          "id": 137925940106684781,
+          "name": "比心",
+          "icon": "https://xhslive-sfg.xhscdn.com/cny_resource/104102t03202h5t916e06ifre80jp60000000000vbd46k",
+          "type": 0,
+          "coins": 1,
+          "show_type": 0,
+          "gift_level": 1
+        },
+        "gift_action_info": {
+          "gift_id": 137925940106684781,
+          "count": 1,
+          "transaction_id": "649cddab0000000025035f4e_137925940106684781_1786806863141",
+          "comb_key": "649cddab0000000025035f4e_570409528162863169_137925940106684781_1786806858310_64ccb022000000000e0241a5",
+          "comb_count": 10,
+          "show_style": 0,
+          "show_priority": 1,
+          "gift_extra_info": {
+            "pre_source": "",
+            "is_group_live_pk": "false",
+            "team_id": "",
+            "source": "note_detail",
+            "send_time": "1786806863329",
+            "is_group_live": "false",
+            "gift_name": "比心",
+            "send_time_from_server": "1786806863405",
+            "is_mic": "true"
+          }
+        },
+        "gift_effect_info": {
+          "gift_effects": []
+        },
+        "show_style_info": {
+          "style": "default",
+          "extra_info": {}
+        }
+      }
+    }
+  ],
+  "cookies": {},
+  "celestial": {
+    "code": -1,
+    "success": false
+  },
+  "uid": "6a8082490000000013031c09",
+  "device_id": "5524cbb4-7321-484e-965c-7d399faeb3df",
+  "http_apis": [
+    "https://live-room.xiaohongshu.com/api/sns/red/live/web/v1/room/current_room_info?room_id=570409528162863169&request_user_id=6a8082490000000013031c09&source=web_live&client_type=1",
+    "https://live-room.xiaohongshu.com/api/sns/red/live/web/v1/room/current_room_info?room_id=570409528162863169&request_user_id=6a8082490000000013031c09&source=web_live&client_type=1",
+    "https://live-room.xiaohongshu.com/api/sns/red/live/web/v1/room/join_comment_info?room_id=570409528162863169&source=web_live&pre_source=pc_web&track_id=&client_type=1",
+    "https://live-room.xiaohongshu.com/api/sns/red/live/web/v1/room/join_comment_info?room_id=570409528162863169&source=web_live&pre_source=pc_web&track_id=&client_type=1",
+    "https://edith.xiaohongshu.com/api/sns/web/v1/celestial/lt",
+    "https://edith.xiaohongshu.com/api/sns/web/v1/celestial/lt"
+  ],
+  "page": {
+    "deviceId": "5524cbb4-7321-484e-965c-7d399faeb3df",
+    "webId": "740995eacac9380efd39709f8603b2fc",
+    "web_session": "",
+    "cookie": "abRequestId=f393e6cb-8314-5eee-82ba-812602d3861f; ets=1786806854002; webBuild=6.41.3; xsecappid=xhs-pc-web; loadts=1786806854766; a1=1a005fce4c0iccz6rvca29b26zrozgj4cm44n2w6f40000385386; webId=740995eacac9380efd39709f8603b2fc; websectiga=10f9a40ba454a07755a08f27ef8194c53637eba4551cf9751c009g9afb564467; sec_poison_id=a43bf243-9b45-4d9e-8192-bae68eab9fe7; gid=y0882iSif2S8y0882iSd46JES83SSuKFhS0J4KijDJKuF448lukV4I888qY2qYK8yJ22f0dj",
+    "celestial": null,
+    "celestial2": {
+      "code": -1,
+      "success": false
+    },
+    "celestialErr": "SyntaxError: Unexpected token 'c', \"create inv\"... is not valid JSON",
+    "title": "活不腻来相亲的小红书直播间"
+  },
+  "sid_sample": "a1:Cl8KHwoYNmE4MDgyNDkwMDAwMDAwMDEzMDMxYzA5EgNyZWQSNAoHYnJvd3NlchIDd2ViGiQ1NTI0Y2JiNC03MzIxLTQ4NGUtOTY1Yy03ZDM5OWZhZWIzZGYaBnhocy1wYxACGOBOIJX386+ANCosMlJiUGxPeDZVOXAvdFErZzU5dGd1WTZlN2xKekhEd1gzaVVrelcwbFIrRT0="
+}
