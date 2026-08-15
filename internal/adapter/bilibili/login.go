@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"os/exec"
 	"time"
 
+	qrcode "github.com/skip2/go-qrcode"
 	"github.com/xifan2333/webcast-mate/internal/session"
 )
 
@@ -190,19 +190,17 @@ func (c *Client) loginQR(ctx context.Context) (*Session, error) {
 	}
 }
 
-// printQR prints the default terminal QR via qrencode (no aspect tweaks).
+// printQR prints a terminal QR with go-qrcode defaults (ToSmallString).
 func printQR(content, filename string) {
 	_ = filename
 	if content == "" {
 		return
 	}
-	path, err := exec.LookPath("qrencode")
+	q, err := qrcode.New(content, qrcode.Medium)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "bilibili: qr: %v\n", err)
 		return
 	}
-	// qrencode default image type is PNG (needs -o); for TTY use stock ANSIUTF8.
-	cmd := exec.Command(path, "-t", "ANSIUTF8", content)
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
-	_ = cmd.Run()
+	// library default compact terminal art; no custom aspect hacks
+	fmt.Fprint(os.Stderr, q.ToSmallString(false))
 }
