@@ -200,7 +200,8 @@ func printQR(content, filename string) {
 	if err != nil {
 		return
 	}
-	cmd := exec.Command(path, content)
+	// qrencode default image type is PNG (needs -o); for TTY use stock ANSIUTF8.
+	cmd := exec.Command(path, "-t", "ANSIUTF8", content)
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	_ = cmd.Run()
