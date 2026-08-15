@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"os/exec"
 	"time"
 
-	"github.com/xifan2333/webcast-mate/internal/qrterm"
 	"github.com/xifan2333/webcast-mate/internal/session"
 )
 
@@ -190,16 +190,18 @@ func (c *Client) loginQR(ctx context.Context) (*Session, error) {
 	}
 }
 
-// printQR prints a scannable terminal QR (half-block, correct aspect).
-// filename is unused (kept for call-site stability); no PNG/xdg-open path.
+// printQR prints the default terminal QR via qrencode (no aspect tweaks).
 func printQR(content, filename string) {
 	_ = filename
 	if content == "" {
 		return
 	}
-	if err := qrterm.Fprint(os.Stderr, content); err != nil {
-		fmt.Fprintf(os.Stderr, "bilibili: qr render: %v\n", err)
+	path, err := exec.LookPath("qrencode")
+	if err != nil {
+		return
 	}
+	cmd := exec.Command(path, content)
+	cmd.Stdout = os.Stderr
+	cmd.Stderr = os.Stderr
+	_ = cmd.Run()
 }
-
-func printTerminalQR(u string) { printQR(u, "") }
