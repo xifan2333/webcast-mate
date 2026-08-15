@@ -59,9 +59,20 @@ go test ./...
 |-------|--------|
 | SPEC CLI `start`/`stop` + default JSON | done |
 | Go module + CLI skeleton + conf R/W | done |
-| Platform adapters | **stub** (`start` → not implemented) |
+| `bilibili` adapter | QR login + startLive/stopLive + face auth |
+| `douyin` / `xiaohongshu` | stub |
 
-Next: bilibili adapter → xiaohongshu → douyin (+ keepalive).
+Next: xiaohongshu → douyin (+ keepalive).
+
+### bilibili setup
+
+```bash
+# edit room_id (real room id) and area_v2
+$EDITOR ~/.config/webcast-mate/bilibili/config.yaml
+
+webcast-mate start bilibili   # QR login on first run → JSON
+webcast-mate stop bilibili
+```
 
 ## Reference
 

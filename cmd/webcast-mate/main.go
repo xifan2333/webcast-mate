@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/xifan2333/webcast-mate/internal/adapter"
+	"github.com/xifan2333/webcast-mate/internal/adapter/bilibili"
 	"github.com/xifan2333/webcast-mate/internal/adapter/stub"
 	"github.com/xifan2333/webcast-mate/internal/conf"
 	"github.com/xifan2333/webcast-mate/internal/platform"
@@ -83,13 +85,14 @@ CONFIG
   (currently: %s)
 
 STATUS
-  Scaffold only — adapters return "not implemented" on start.
+  bilibili: implemented (QR login + start/stop)
+  douyin / xiaohongshu: stub
 `, confPathDisplay())
 }
 
 func registry() *adapter.Registry {
 	return adapter.NewRegistry(
-		stub.New(platform.Bilibili),
+		bilibili.New(),
 		stub.New(platform.Douyin),
 		stub.New(platform.XiaoHongShu),
 	)
@@ -123,8 +126,7 @@ OUTPUT
 	res, err := a.Start(ctx)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		// not implemented → exit 1 for now
-		return 1
+		return exitCode(err)
 	}
 	// write conf when real adapters return server/key
 	if res.Server != "" || res.Key != "" {
@@ -223,5 +225,24 @@ func confPathDisplay() string {
 		return "$HOME/.config/livestream/platforms.conf"
 	}
 	return p
+}
+
+func exitCode(err error) int {
+	if err == nil {
+		return 0
+	}
+	s := err.Error()
+	switch {
+	case strings.Contains(s, "not configured"):
+		return 2
+	case strings.Contains(s, "not logged in"):
+		return 3
+	case strings.Contains(s, "not implemented"):
+		return 1
+	case strings.Contains(s, "qrcode"), strings.Contains(s, "timeout"), strings.Contains(s, "face auth"):
+		return 5
+	default:
+		return 1
+	}
 }
 
