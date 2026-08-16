@@ -104,8 +104,8 @@ func cmdStart(args []string) int {
 	if hasHelp(args) {
 		fmt.Print(`Go live on a platform.
 
-Interactive (default, TTY): prompt room / title / area / cover (huh),
-then open. Use -y to skip prompts and use ~/.config/webcast-mate/<platform>/.
+Interactive (default, TTY): prompt room, title, category, cover,
+then go live. Use -y to skip prompts and use saved config.
 
 USAGE
   webcast-mate start <platform> [-y]
