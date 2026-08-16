@@ -32,7 +32,7 @@ func ResolveConfig(ctx context.Context, cli *Client, opts adapter.StartOpts) (*C
 		return cfg, nil
 	}
 
-	fmt.Fprintf(os.Stderr, "bilibili: 开播设置（将保存到 %s）\n", path)
+	_ = path
 
 	// Prefer live category list when logged in; fall back to free text.
 	var areaOptions []huh.Option[string]
@@ -55,7 +55,11 @@ func ResolveConfig(ctx context.Context, cli *Client, opts adapter.StartOpts) (*C
 		areaV2 = "21"
 	}
 
+	// Note is the visible page heading (Group.Title is easy to clip with viewport height).
 	fields := []huh.Field{
+		huh.NewNote().
+			Title("开播设置").
+			Description("填写后将保存，下次可用 -y 跳过"),
 		huh.NewInput().
 			Title("直播间号").
 			Description("直播姬 / 直播中心显示的房间号（不是短号）").
@@ -98,9 +102,7 @@ func ResolveConfig(ctx context.Context, cli *Client, opts adapter.StartOpts) (*C
 		Description("已有封面图链接（可选，留空跳过）").
 		Value(&cover))
 
-	form := huh.NewForm(
-		huh.NewGroup(fields...).Title("开播设置"),
-	).WithTheme(huh.ThemeCharm())
+	form := huh.NewForm(huh.NewGroup(fields...)).WithTheme(huh.ThemeCharm())
 	if err := form.Run(); err != nil {
 		return nil, err
 	}
