@@ -210,7 +210,7 @@ STDOUT (data commands: one JSONL object, SetEscapeHTML=false)
     {"ok":false,"command":"start","platform":"douyin","error":"…","code":3}
 
 STDERR
-  QR / face-auth graphics only (plain). help is plain. No progress spam.
+  QR graphics (plain) + JSONL diagnostics (e.g. face auth). help is plain. No progress spam.
 
 EXAMPLES
   webcast-mate login bilibili | jq -c '{ok,user_name,user_id}'

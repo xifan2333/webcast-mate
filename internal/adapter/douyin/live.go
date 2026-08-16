@@ -332,13 +332,15 @@ func (c *Client) CreateRoom(ctx context.Context, title, categoryEnc string) (*Cr
 		}
 		ce := classifyCreateResponse(m)
 		if ce != nil && ce.Kind == "face" && ce.AuthURL != "" {
-			// stderr only: face prompt + URL (same contract as QR)
-			fmt.Fprintln(os.Stderr, "douyin: face verification required")
-			if ce.Prompt != "" {
-				fmt.Fprintln(os.Stderr, ce.Prompt)
-			}
-			fmt.Fprintln(os.Stderr, ce.AuthURL)
-			fmt.Fprintln(os.Stderr, "complete face auth in the browser (camera), then wait…")
+			// stderr: one JSONL event (stderr = diagnostics, no progress spam)
+			enc := json.NewEncoder(os.Stderr)
+			enc.SetEscapeHTML(false)
+			_ = enc.Encode(map[string]any{
+				"event":    "face_auth_required",
+				"platform": "douyin",
+				"prompt":   ce.Prompt,
+				"url":      ce.AuthURL,
+			})
 			openAuthURL(ce.AuthURL)
 			if err := c.waitFaceResult(ctx); err != nil {
 				if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
@@ -346,7 +348,6 @@ func (c *Client) CreateRoom(ctx context.Context, title, categoryEnc string) (*Cr
 				}
 				return nil, fmt.Errorf("%w: %v", ErrFaceFailed, err)
 			}
-			fmt.Fprintln(os.Stderr, "douyin: face auth ok, retrying create…")
 			continue
 		}
 		if ce == nil {
