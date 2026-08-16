@@ -77,12 +77,14 @@ func ResolveConfig(ctx context.Context, cli *Client, opts adapter.StartOpts) (*C
 	}
 
 	if len(areaOptions) > 0 {
+		// Height is the *whole* field (title + list). Too small clips Title("分区").
+		// Reserve ~3 lines for title/desc, rest for options.
 		fields = append(fields, huh.NewSelect[string]().
 			Title("分区").
 			Description("本次直播所属分区").
 			Options(areaOptions...).
 			Value(&areaV2).
-			Height(12).
+			Height(16).
 			Filtering(true))
 	} else {
 		fields = append(fields, huh.NewInput().
