@@ -2,7 +2,7 @@
 package termimg
 
 import (
-	"fmt"
+	"encoding/json"
 	"os"
 	"os/exec"
 
@@ -12,7 +12,7 @@ import (
 // ShowQR shows a QR code and returns a close func that kills the viewer.
 //  1. write PNG to a temp file and open imv / xdg-open
 //  2. else kitty graphics if stderr is a TTY and supports it
-//  3. else ASCII fallback
+//  3. else print the raw URL as a JSONL event
 func ShowQR(png []byte, content string) (close func()) {
 	close = func() {}
 	if len(png) == 0 && content != "" {
@@ -37,9 +37,10 @@ func ShowQR(png []byte, content string) (close func()) {
 	if content == "" {
 		return close
 	}
-	if q, err := qrcode.New(content, qrcode.Medium); err == nil {
-		fmt.Fprint(os.Stderr, q.ToSmallString(false))
-	}
+	// fallback: no image viewer / kitty — print the raw URL
+	enc := json.NewEncoder(os.Stderr)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(map[string]any{"event": "qr_login", "url": content})
 	return close
 }
 
