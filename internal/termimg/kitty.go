@@ -11,14 +11,7 @@ import (
 )
 
 // SupportsKitty reports whether this environment likely understands Kitty graphics.
-// Force with WEBCAST_MATE_KITTY=1 / disable with WEBCAST_MATE_KITTY=0.
 func SupportsKitty() bool {
-	switch strings.ToLower(os.Getenv("WEBCAST_MATE_KITTY")) {
-	case "1", "true", "yes", "on":
-		return true
-	case "0", "false", "no", "off":
-		return false
-	}
 	if os.Getenv("KITTY_WINDOW_ID") != "" {
 		return true
 	}

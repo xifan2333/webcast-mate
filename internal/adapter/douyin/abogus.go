@@ -8,7 +8,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	mrand "math/rand"
-	"os"
 	"strings"
 	"time"
 
@@ -49,11 +48,8 @@ var stickyProtected = map[int]struct{}{
 
 type floatRNG interface{ Float64() float64 }
 
-// SignABogus pure local algo. Debug override: WEBCAST_MATE_DY_ABOGUS=<token>.
+// SignABogus pure local algo.
 func SignABogus(query, body string) (string, error) {
-	if v := strings.TrimSpace(os.Getenv("WEBCAST_MATE_DY_ABOGUS")); v != "" {
-		return v, nil
-	}
 	return GenerateABogus(query, body, userAgent, 0, 0), nil
 }
 

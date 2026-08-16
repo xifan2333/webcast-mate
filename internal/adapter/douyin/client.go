@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
@@ -51,18 +50,7 @@ type Client struct {
 }
 
 func NewClient() *Client {
-	return &Client{
-		Client:   httpx.New(),
-		DeviceID: envOr("WEBCAST_MATE_DY_DEVICE_ID", ""),
-		IID:      envOr("WEBCAST_MATE_DY_IID", ""),
-	}
-}
-
-func envOr(k, def string) string {
-	if v := os.Getenv(k); v != "" {
-		return v
-	}
-	return def
+	return &Client{Client: httpx.New()}
 }
 
 func (c *Client) commonQuery() url.Values {

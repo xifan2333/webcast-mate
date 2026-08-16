@@ -446,7 +446,7 @@ ping/anchor  status=4
 ### a_bogus
 
 登录与开播 **都需要**。伴侣 `p_bd=1.0.1.20`。  
-实现可暂时：Chromium/bdms、或外部 `WEBCAST_MATE_DY_ABOGUS_CMD`；最终目标无浏览器。  
+实现：纯 Go 移植（bdms 1.0.1.20，无浏览器）。  
 **开播 create 已有 a_bogus 路径时，登录 get/check 必须同一能力覆盖。**
 
 ---

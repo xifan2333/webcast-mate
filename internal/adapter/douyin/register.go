@@ -6,7 +6,7 @@ package douyin
 //   os=Windows  device_platform=PC  device_type=PC
 //
 // did/iid lifecycle (aligned with companion deviceIdManage):
-//   1. client already has valid did+iid (env / ApplySecrets) → reuse
+//   1. client already has valid did+iid (ApplySecrets) → reuse
 //   2. else secrets.params → reuse
 //   3. else POST device_register (+ activate) → persist to secrets.params
 // Never invent random ids; never hardcode another install's did.
@@ -40,7 +40,7 @@ func (c *Client) hasDevice() bool {
 	return c.DeviceID != "" && c.IID != "" && c.DeviceID != "0" && c.IID != "0"
 }
 
-// EnsureDevice fills did/iid: env/client → secrets → device_register.
+// EnsureDevice fills did/iid: client → secrets → device_register.
 // Persists a successful pair into secrets.params so later runs reuse it.
 func (c *Client) EnsureDevice(ctx context.Context) error {
 	select {
@@ -49,7 +49,7 @@ func (c *Client) EnsureDevice(ctx context.Context) error {
 	default:
 	}
 	if c.hasDevice() {
-		// env or prior ApplySecrets — make sure secrets catch up
+		// prior ApplySecrets — make sure secrets catch up
 		_ = c.persistDeviceIDs()
 		return nil
 	}

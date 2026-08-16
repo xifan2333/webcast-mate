@@ -74,9 +74,9 @@ go test ./...
 | `douyin` | streamingtool QR login; create_info + a_bogus + create; ping LIVING/FINISH; status |
 | `xiaohongshu` | live-helper 4.4.0: CAS QR → AT → redobs pre/start/stop; distribute 0/1 |
 
-`a_bogus` for douyin: needs chromium on PATH (bdms 1.0.1.20), or `WEBCAST_MATE_DY_ABOGUS` / `WEBCAST_MATE_DY_ABOGUS_CMD`.
+`a_bogus` for douyin: pure-Go (bdms 1.0.1.20 port), no chromium.
 
-Next: reverse 2026 小红书直播伴侣 for start/stop/status; pure a_bogus without chromium when ready.
+Next: reverse 2026 小红书直播伴侣 for start/stop/status.
 
 ### bilibili setup
 
