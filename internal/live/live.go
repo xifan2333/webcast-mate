@@ -20,7 +20,9 @@ type File struct {
 
 // Target is one active RTMP destination.
 type Target struct {
-	RoomID       string    `json:"room_id"`
+	RoomID string `json:"room_id"`
+	// StreamID is platform-specific (douyin ping/anchor needs it).
+	StreamID     string    `json:"stream_id,omitempty"`
 	Server       string    `json:"server"`
 	Key          string    `json:"key"`
 	VideoBitrate int       `json:"video_bitrate"`

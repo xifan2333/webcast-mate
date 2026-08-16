@@ -262,7 +262,6 @@ ttwid → get_qrcode → check_qrconnect(confirmed) → 桌面 Cookie
 
 > 弹幕/长连接协议（RWP）见独立文档 [protocol-xhs-danmaku.md](./protocol-xhs-danmaku.md)（与开播/推流码无关）。
 
-**本仓库不做**旧电脑助手 `robs.xiaohongshu.com` 短信 `sid` + `live/pre|start|stop` 链路（第三方复刻年代偏旧，不是 2026 官方主推）。
 
 ### 3.1 网页 OBS（6 位连接码 → 推流地址）
 
@@ -329,8 +328,6 @@ WEBCAST_MATE_XHS_CODE=254966 webcast-mate start xiaohongshu -y
 
 - **edith** `login/qrcode/*`（`xhs-pc-web`）：笔记/Web 常见扫码；实测可 scanned，确认后会话升级不稳定，**不默认当作 2026 开播登录定论**。
 - **redlive / customer CAS**（`omikuji` / `XYW_`）：另一套后台登录，**当前不采用**。
-- **旧 robs 短信 sid**：**明确不做**。
-- 实机以「能成功调用 `push_url?code=` 的 cookie 从哪来」为准；实现只保证 **有合法 web 会话 + 六位码 → 取 RTMP**。
 
 ---
 
@@ -345,7 +342,7 @@ WEBCAST_MATE_XHS_CODE=254966 webcast-mate start xiaohongshu -y
 | **推流码形态** | addr + code 两段 | 完整 rtmp_push_url | 完整 push_url / 固定 server+key |
 | **码是否一场一变** | 是 | 是 | 是（常换 6 位码） |
 | **额外门槛** | 人脸 60024 | 桌面会话；a_bogus | 手机预直播出码 |
-| **本仓库状态** | 协议清（油猴+扫码探活） | 登录+开播+关播已通 | OBS 取码路径；登录来源待实机钉死 |
+| **本仓库状态** | 协议清（油猴+扫码探活） | webcast-mate：登录+create+ping（a_bogus 经 chromium/bdms） | OBS 取码路径；登录来源待实机；伴侣逆向后补 status |
 | **写入 conf** | server=addr, key=code | 拆 url 或整段 | server 固定 + key |
 
 ---
@@ -374,7 +371,6 @@ WEBCAST_MATE_XHS_CODE=254966 webcast-mate start xiaohongshu -y
 | 抖音登录+create+ping+ffmpeg | 已实机通过 |
 | 小红书 OBS `push_url` | 用户 curl / 官方 6 位码流程；`xsecappid=spectrum` |
 | 小红书 web server | `rtmp://live-push.xhscdn.com/live`（官方 OBS 文档） |
-| 小红书 robs 短信 | **不做**（旧助手协议，仅历史参考） |
 
 ---
 

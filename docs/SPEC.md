@@ -425,7 +425,7 @@ type Adapter interface {
 | stop | stopLive | 停保活+ping FINISH | 手机关播 + 清 live.json |
 | 写 conf | ✓ | ✓ | ✓ |
 | 额外交互 | 人脸 60024 扫码 | 登录确认频控 | 手机预直播 6 位码 |
-| 无浏览器 start | ✓（纯 HTTP） | **待 a_bogus 方案** | 取码纯 HTTP；登录来源待钉死 |
+| 无浏览器 start | ✓（纯 HTTP） | create 需 a_bogus（chromium+bdms 或外部 CMD） | 取码纯 HTTP；登录来源待钉死 |
 | 弹幕链（UniBarrage） | ✓ | ✓ | ✓（xiaohongshu） |
 
 ---

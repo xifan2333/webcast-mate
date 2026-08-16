@@ -71,10 +71,12 @@ go test ./...
 | SPEC CLI `start`/`stop` + default JSON | done |
 | Go module + CLI skeleton + conf R/W | done |
 | `bilibili` adapter | QR login + startLive/stopLive + face auth |
-| `xiaohongshu` | OBS 6-digit code → `push_url` (no robs SMS path) |
-| `douyin` | stub |
+| `douyin` | streamingtool QR login; create_info + a_bogus + create; ping LIVING/FINISH; status |
+| `xiaohongshu` | OBS 6-digit → `push_url` only (**no robs**); login cookie source TBD |
 
-Next: nail xhs login cookie source for OBS → douyin (+ keepalive).
+`a_bogus` for douyin: needs chromium on PATH (bdms 1.0.1.20), or `WEBCAST_MATE_DY_ABOGUS` / `WEBCAST_MATE_DY_ABOGUS_CMD`.
+
+Next: reverse 2026 小红书直播伴侣 for start/stop/status; pure a_bogus without chromium when ready.
 
 ### bilibili setup
 
