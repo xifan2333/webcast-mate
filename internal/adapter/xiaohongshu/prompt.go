@@ -2,7 +2,6 @@ package xiaohongshu
 
 import (
 	"context"
-	"os"
 
 	"github.com/charmbracelet/huh"
 	"github.com/xifan2333/webcast-mate/internal/adapter"
@@ -44,9 +43,6 @@ func ResolveOpenConfig(ctx context.Context, cli *Client, opts adapter.StartOpts)
 	}
 	if id, err := cli.LastCategoryID(); err == nil && cfg.Area == "" {
 		cfg.Area = id
-	}
-	if t := os.Getenv("WEBCAST_MATE_XHS_TITLE"); t != "" {
-		cfg.Title = t
 	}
 
 	var areaOptions []huh.Option[string]

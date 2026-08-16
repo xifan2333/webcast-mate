@@ -2,7 +2,6 @@ package douyin
 
 import (
 	"context"
-	"os"
 
 	"github.com/charmbracelet/huh"
 	"github.com/xifan2333/webcast-mate/internal/adapter"
@@ -34,12 +33,6 @@ func ResolveOpenConfig(ctx context.Context, cli *Client, opts adapter.StartOpts)
 		if p.Area != "" {
 			cfg.Area = p.Area
 		}
-	}
-	if t := os.Getenv("WEBCAST_MATE_DY_TITLE"); t != "" {
-		cfg.Title = t
-	}
-	if c := os.Getenv("WEBCAST_MATE_DY_AREA"); c != "" {
-		cfg.Area = c
 	}
 
 	var areaOptions []huh.Option[string]
