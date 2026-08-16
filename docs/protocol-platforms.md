@@ -320,7 +320,7 @@ WEBCAST_MATE_XHS_CODE=254966 webcast-mate start xiaohongshu -y
 | 材料 | 路径 |
 |------|------|
 | B 站油猴 | `~/Code/userscripts/scripts/bilibili-live-helper.user.js` |
-| 抖音开播 | `~/douyin-live`：`pure_create.py` / `login.py`；参数表 `reference/protocol-params.md` |
+| 抖音开播 | [protocol-douyin-companion.md](./protocol-douyin-companion.md) |
 | 小红书 web OBS 页 | https://www.xiaohongshu.com/zhibo/obs |
 | 小红书旧助手复刻（参考 only，不实现） | github.com/ShigemoriHakura/XiaoHongShu_OBS |
 | 推流 conf | `~/.config/livestream/platforms.conf` |

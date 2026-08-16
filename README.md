@@ -95,5 +95,5 @@ Cover accepts an existing `*.hdslb.com` URL (local file upload TBD).
 
 ## Reference
 
-- Douyin Python: `~/douyin-live` (`login.py` / `pure_create.py`)
+- Douyin protocol: `docs/protocol-douyin-companion.md`
 - Bilibili: `~/Code/userscripts` live helper

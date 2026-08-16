@@ -449,7 +449,7 @@ type Adapter interface {
 | P4 | `douyin`：会话 + create/ping + **保活守护** + 无浏览器签名 |
 | P5 | hook/脚本对接 capture-router；stdout 喂 dmnotifier |
 
-对照代码：P2–P4 可对照 `~/douyin-live` 与 `userscripts/bilibili-live-helper.user.js`、XiaoHongShu_OBS 协议，**不**把 Python 当运行时依赖。  
+对照：抖音见 [protocol-douyin-companion.md](./protocol-douyin-companion.md)；B 站可对 `userscripts` live helper；小红书见 helper/danmaku 协议文档。**不**把 Python 当运行时依赖。  
 管道目标（P5）以 §2 为准：只调 HTTP API / 输出 NDJSON，不 import 下游程序。
 
 ---
