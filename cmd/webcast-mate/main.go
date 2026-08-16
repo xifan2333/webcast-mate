@@ -218,12 +218,13 @@ func writeConf(platformID, server, key string) error {
 }
 
 func printJSON(v any) int {
-	b, err := json.Marshal(v)
-	if err != nil {
+	// Do not HTML-escape (& → \u0026); stream keys must stay raw for conf/scripts.
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	fmt.Println(string(b))
 	return 0
 }
 
