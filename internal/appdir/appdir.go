@@ -10,16 +10,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 )
 
-// Root is ~/.config/webcast-mate.
+// Root is ~/.config/webcast-mate (Linux-only; XDG).
 func Root() (string, error) {
-	if runtime.GOOS == "windows" {
-		if app := os.Getenv("AppData"); app != "" {
-			return filepath.Join(app, "webcast-mate"), nil
-		}
-	}
 	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
 		return filepath.Join(xdg, "webcast-mate"), nil
 	}

@@ -1,7 +1,7 @@
 # webcast-mate · 产品与扩展规范
 
 > 状态：**规范阶段**（无实现要求）。  
-> 实现语言倾向：**Go**（跨平台单文件、标准库 HTTP；性能对协议 CLI 足够）。  
+> 实现语言倾向：**Go**（单文件、标准库 HTTP；性能对协议 CLI 足够）。  
 > 协议细节：[`protocol-platforms.md`](./protocol-platforms.md)。  
 > 抖音伴侣真链路：[protocol-douyin-companion.md](./protocol-douyin-companion.md)。抓包工具可放 `~/douyin-live`（仅 mitm，非运行时）。
 
@@ -459,7 +459,7 @@ type Adapter interface {
 - 单元测试：conf 合并、URL 拆 server/key、错误码映射。  
 - 集成测试：对 mock server；实网测试手动、不进 CI 密钥。  
 - 禁止测试提交真实 Cookie/短信/推流 key。  
-- `go test ./…`；release 用 `gox`/`goreleaser` 或多 `GOOS` 交叉编译（实现阶段再定）。
+- `go test ./…`；release 用 `goreleaser`（Linux 单平台）。
 
 ---
 
