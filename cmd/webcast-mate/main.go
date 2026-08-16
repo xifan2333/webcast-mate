@@ -77,7 +77,7 @@ OUTPUT
   stop             one JSON line: platform, room_id, status
 
   status is live when server+key are set (from live.json); otherwise idle
-  (cookie still filled from secrets when present).
+  (cookie = secrets for bili/dy; xhs always empty — danmaku uses browser).
 
   Diagnostics go to stderr. Pipe stdout to jq.
 
@@ -92,7 +92,7 @@ EXAMPLES
 CONFIG
   $XDG_CONFIG_HOME/webcast-mate/
     config.yaml           preferences (room, title, 分区, bitrate)
-    secrets/<platform>.json   cookies (0600)
+    secrets/<platform>.json   unified {cookie,user_id,user_name,login_at} (0600)
     live.json             active push targets for capture
   (root: %s)
 
@@ -153,7 +153,7 @@ func cmdStatus(args []string) int {
 		fmt.Print(`Query live status on the platform.
 
 Calls the platform room API for status (live|idle|…).
-Fills cookie/server/key from local secrets + live.json when present
+Fills server/key from live.json; cookie from secrets (xhs empty)
 (same field names as start).
 
 USAGE

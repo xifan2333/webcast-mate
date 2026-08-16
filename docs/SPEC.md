@@ -67,7 +67,7 @@ UniBarrage 已装（`/usr/bin/unibarrage`，默认 `API :8080`、`WS :7777`）�
 |-----------------|----------------------|
 | `platform` | platform id（`bilibili`/`douyin`/`xiaohongshu`，无别名） |
 | `rid` | `start` 返回的 `room_id` |
-| `cookie` | `start` 返回的 cookie（bili 整段 / douyin Cookie 头 / xhs 可空） |
+| `cookie` | `start` 返回的 cookie（bili/dy 整段；**xhs 固定空**，弹幕另取浏览器） |
 
 HTTP 接口（见其 README）：
 
@@ -260,7 +260,7 @@ webcast-mate help | version | -h | --help | -v | --version
 |------|------|
 | `platform` | 规范 id |
 | `room_id` | 本场房间号 |
-| `cookie` | 会话 Cookie 串；xhs 游客可为 `""` |
+| `cookie` | 弹幕用会话 Cookie；bili/dy = secrets；**xhs 固定 `""`**（浏览器另取） |
 | `server` | 推流服务器（不含 key），写入 conf |
 | `key` | 推流密钥，写入 conf |
 
@@ -352,26 +352,34 @@ type Adapter interface {
 }
 ```
 
-### 6.3 会话存储布局（建议）
+### 6.3 会话存储（统一 secrets schema）
 
 ```text
 ~/.config/webcast-mate/
-  bilibili/
-    cookies.txt          # 或 cookies.json；0600
-    meta.json            # uid, login_at
-  douyin/
-    cookies.txt          # 桌面会话整段 Cookie 头
-    meta.json
-  xiaohongshu/
-    session.json         # sid + cookies；0600
-  state/
-    bilibili-room.json   # 上次 start 的 room_id 等，供 stop
-    douyin-room.json
-    xiaohongshu-room.json
+  secrets/<platform>.json   # 0600；三家同一 schema
+  live.json                 # 本场 RTMP 真相（server/key/room_id）
+  config.yaml               # 非密钥偏好（标题、码率…）
 ```
 
+`secrets/<platform>.json` 字段固定：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `cookie` | string | **开播鉴权**材料，统一写成 `k=v; k2=v2` 串 |
+| `user_id` | string | 可选 |
+| `user_name` | string | 可选 |
+| `login_at` | RFC3339 | 可选 |
+
+各平台 `cookie` 语义（都进同一字段，不另开 schema）：
+
+| platform | `secrets.cookie` 内容 | stdout `cookie`（弹幕链） |
+|----------|----------------------|---------------------------|
+| bilibili | 浏览器会话 Cookie（`SESSDATA`/`bili_jct`…） | = secrets.cookie |
+| douyin | 桌面会话 Cookie（`sessionid`/`ttwid`…） | = secrets.cookie |
+| xiaohongshu | live-helper 开播凭证串：`access-token=AT-…; device-id=…; a1=…; webId=…` | **始终 `""`**（弹幕用浏览器 Cookie，不走 helper AT） |
+
 - **不要**把会话写进 git 或世界可读路径。  
-- 平台目录名 = platform id。
+- room_id / server / key **不**进 secrets，只进 `live.json`。
 
 ### 6.4 conf 写入规则
 

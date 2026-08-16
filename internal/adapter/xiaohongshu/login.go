@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -16,107 +17,14 @@ import (
 	"github.com/xifan2333/webcast-mate/internal/termimg"
 )
 
-// loadSession reads secrets as a Cookie header string (+ user meta).
-// Supports legacy JSON blob once (migrates on next save).
-func loadSession() (*SessionBlob, error) {
-	f, err := secrets.Load("xiaohongshu")
-	if err != nil {
-		return nil, err
-	}
-	if f.Cookie == "" {
-		return nil, os.ErrNotExist
-	}
-	// one-shot migrate: old JSON in Cookie field
-	if f.Cookie[0] == '{' {
-		var s SessionBlob
-		if err := json.Unmarshal([]byte(f.Cookie), &s); err != nil {
-			return nil, err
-		}
-		if s.UserID == "" {
-			s.UserID = f.UserID
-		}
-		if s.UserName == "" {
-			s.UserName = f.UserName
-		}
-		if s.LoginAt.IsZero() {
-			s.LoginAt = f.LoginAt
-		}
-		return &s, nil
-	}
-	s := parseCookieSession(f.Cookie)
-	if s.UserID == "" {
-		s.UserID = f.UserID
-	}
-	if s.UserName == "" {
-		s.UserName = f.UserName
-	}
-	s.LoginAt = f.LoginAt
-	if s.AccessToken == "" && s.A1 == "" {
-		return nil, os.ErrNotExist
-	}
-	return s, nil
-}
-
-func saveSession(s *SessionBlob) error {
-	if s == nil {
-		return fmt.Errorf("nil session")
-	}
-	if s.LoginAt.IsZero() {
-		s.LoginAt = time.Now().UTC()
-	}
-	// rebuild client-shaped cookie for stable serialize
-	c := NewClient()
-	c.applySession(s)
-	return secrets.Save("xiaohongshu", &secrets.File{
-		Cookie:   c.CookieHeader(),
-		UserID:   s.UserID,
-		UserName: s.UserName,
-		LoginAt:  s.LoginAt,
-	})
-}
-
-// parseCookieSession turns "k=v; k2=v2" into SessionBlob.
-func parseCookieSession(header string) *SessionBlob {
-	s := &SessionBlob{CookieExtra: map[string]string{}}
-	for _, part := range strings.Split(header, ";") {
-		part = strings.TrimSpace(part)
-		k, v, ok := strings.Cut(part, "=")
-		if !ok {
-			continue
-		}
-		k, v = strings.TrimSpace(k), strings.TrimSpace(v)
-		switch strings.ToLower(k) {
-		case "access-token", "auth":
-			if v != "" {
-				s.AccessToken = v
-			}
-		case "a1":
-			s.A1 = v
-		case "webid":
-			s.WebID = v
-		case "device-id":
-			s.DeviceID = v
-		case "xhs-room-id", "room_id", "room-id":
-			s.RoomID = v
-		case "xsecappid":
-			// ignore fixed app id
-		default:
-			if v != "" {
-				s.CookieExtra[k] = v
-			}
-		}
-	}
-	return s
-}
-
-// EnsureLogin loads AT session or runs CAS QR login.
-func (c *Client) EnsureLogin(ctx context.Context) (*SessionBlob, error) {
-	if s, err := loadSession(); err == nil && s.AccessToken != "" {
-		c.applySession(s)
+// EnsureLogin loads secrets or runs CAS QR login (same shape as bilibili/douyin).
+func (c *Client) EnsureLogin(ctx context.Context) (*secrets.File, error) {
+	if s, err := secrets.Load("xiaohongshu"); err == nil && s.Cookie != "" {
+		c.LoadSecrets(s)
 		if ok, _ := c.CheckLogin(); ok {
 			return s, nil
 		}
-		fmt.Fprintln(os.Stderr, "xiaohongshu: saved token invalid, re-login")
+		fmt.Fprintln(os.Stderr, "xiaohongshu: saved session invalid, re-login")
 	}
 	return c.loginQR(ctx)
 }
@@ -130,18 +38,12 @@ func (c *Client) CheckLogin() (bool, map[string]any) {
 	return bizOK(m), m
 }
 
-// CheckLive GET robs/api/sns/live/check_live
-func (c *Client) CheckLive() (map[string]any, error) {
-	return c.do(http.MethodGet, hostRobs, "/api/sns/live/check_live", nil, nil, doOpts{})
-}
-
-func (c *Client) loginQR(ctx context.Context) (*SessionBlob, error) {
+func (c *Client) loginQR(ctx context.Context) (*secrets.File, error) {
 	c.ensureIdentity()
-	// zones (optional)
+
 	_, _ = c.do(http.MethodGet, hostCustomer, "/api/cas/customer/pc/zones", nil,
 		url.Values{"service": {serviceRobs}}, doOpts{sign: true, originRobs: true})
 
-	// create QR
 	body := map[string]any{"service": serviceRobs, "subsystem": "robs"}
 	created, err := c.do(http.MethodPost, hostCustomer, "/api/cas/customer/pc/qr-code", body, nil,
 		doOpts{sign: true, originRobs: true})
@@ -210,7 +112,6 @@ func (c *Client) loginQR(ctx context.Context) (*SessionBlob, error) {
 			ticket = t
 			break
 		}
-		// raw scan for ST-
 		raw, _ := json.Marshal(st)
 		if i := strings.Index(string(raw), "ST-"); i >= 0 {
 			end := i + 2
@@ -233,11 +134,11 @@ func (c *Client) loginQR(ctx context.Context) (*SessionBlob, error) {
 	if ticket == "" {
 		return nil, ErrQRTimeout
 	}
-	fmt.Fprintf(os.Stderr, "xiaohongshu: ticket ok, exchanging AT…\n")
+	fmt.Fprintln(os.Stderr, "xiaohongshu: ticket ok, exchanging AT…")
 
-	// exchange
 	loginBody := map[string]any{"ticket": ticket, "service": serviceRobs}
-	lr, err := c.do(http.MethodPost, hostRobs, "/api/sns/login", loginBody, nil, doOpts{sign: true, originRobs: true})
+	lr, err := c.do(http.MethodPost, hostRobs, "/api/sns/login", loginBody, nil,
+		doOpts{sign: true, originRobs: true})
 	if err != nil {
 		return nil, fmt.Errorf("login: %w", err)
 	}
@@ -255,9 +156,9 @@ func (c *Client) loginQR(ctx context.Context) (*SessionBlob, error) {
 	c.AccessToken = at
 	c.UserID = anyString(ld["user_id"])
 	c.UserName = anyString(ld["nickname"])
-	s := c.sessionBlob()
-	s.LoginAt = time.Now().UTC()
-	if err := saveSession(s); err != nil {
+
+	s := c.SecretsFile()
+	if err := secrets.Save("xiaohongshu", s); err != nil {
 		return nil, err
 	}
 	if c.UserName != "" {
@@ -283,17 +184,16 @@ func printQR(content string) {
 		fmt.Fprintf(os.Stderr, "xiaohongshu: qr: %v\n", err)
 		return
 	}
-	// PNG file + open
 	if png, err := q.PNG(320); err == nil {
 		dir := filepath.Join(os.TempDir(), "webcast-mate")
 		_ = os.MkdirAll(dir, 0o755)
 		path := filepath.Join(dir, "xhs-cas-qr.png")
 		if err := os.WriteFile(path, png, 0o600); err == nil {
 			fmt.Fprintf(os.Stderr, "xiaohongshu: QR image %s\n", path)
-			// best-effort open
 			for _, bin := range []string{"xdg-open", "imv", "imv-wayland", "feh"} {
-				if p, err := execLookPath(bin); err == nil {
-					_ = startDetached(p, path)
+				if p, e := exec.LookPath(bin); e == nil {
+					cmd := exec.Command(p, path)
+					_ = cmd.Start()
 					break
 				}
 			}
@@ -303,8 +203,4 @@ func printQR(content string) {
 		}
 	}
 	fmt.Fprint(os.Stderr, q.ToSmallString(false))
-}
-
-func execLookPath(file string) (string, error) {
-	return lookPath(file)
 }

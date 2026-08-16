@@ -10,11 +10,11 @@ import (
 	"github.com/xifan2333/webcast-mate/internal/appcfg"
 	"github.com/xifan2333/webcast-mate/internal/live"
 	"github.com/xifan2333/webcast-mate/internal/platform"
+	"github.com/xifan2333/webcast-mate/internal/secrets"
 )
 
-// Adapter implements live-helper 4.4.0:
-// CAS QR → AT → pre → before/start → start (distribute) → stop / status.
-// Capture/ffmpeg is external; start returns server/key for gsr/OBS.
+// Adapter implements live-helper 4.4.0 open/stop/status.
+// stdout.cookie is always "" — xhs danmaku uses browser cookies, not helper AT.
 type Adapter struct{}
 
 func New() *Adapter { return &Adapter{} }
@@ -23,8 +23,7 @@ func (a *Adapter) ID() platform.ID { return platform.XiaoHongShu }
 
 func (a *Adapter) Start(ctx context.Context, opts adapter.StartOpts) (*adapter.StartResult, error) {
 	cli := NewClient()
-	sec, err := cli.EnsureLogin(ctx)
-	if err != nil {
+	if _, err := cli.EnsureLogin(ctx); err != nil {
 		return nil, err
 	}
 
@@ -33,7 +32,6 @@ func (a *Adapter) Start(ctx context.Context, opts adapter.StartOpts) (*adapter.S
 		return nil, err
 	}
 
-	// stop previous local room if any
 	if t, ok := live.Get("xiaohongshu"); ok && t.RoomID != "" {
 		_ = cli.StopRoom(t.RoomID)
 		_ = live.Remove("xiaohongshu")
@@ -53,7 +51,6 @@ func (a *Adapter) Start(ctx context.Context, opts adapter.StartOpts) (*adapter.S
 	}
 	fmt.Fprintln(os.Stderr, "xiaohongshu: before/start ok")
 
-	// report with placeholder dims; real encoder may differ
 	file, _ := appcfg.Load()
 	vbr, abr := 4000, 128
 	if file != nil {
@@ -71,14 +68,8 @@ func (a *Adapter) Start(ctx context.Context, opts adapter.StartOpts) (*adapter.S
 		server, key = pushURL, ""
 	}
 
-	// persist room on session
-	if sec != nil {
-		sec.RoomID = roomID
-		sec.AccessToken = cli.AccessToken
-		_ = saveSession(cli.sessionBlob())
-	} else {
-		_ = saveSession(cli.sessionBlob())
-	}
+	// refresh secrets cookie string (a1 may have rotated); room stays in live.json only
+	_ = secrets.Save("xiaohongshu", cli.SecretsFile())
 
 	if err := live.Upsert("xiaohongshu", live.Target{
 		RoomID:       roomID,
@@ -94,7 +85,7 @@ func (a *Adapter) Start(ctx context.Context, opts adapter.StartOpts) (*adapter.S
 	return &adapter.StartResult{
 		Platform: string(platform.XiaoHongShu),
 		RoomID:   roomID,
-		Cookie:   cli.CookieHeader(),
+		Cookie:   "", // danmaku: use browser cookie separately
 		Server:   server,
 		Key:      key,
 	}, nil
@@ -111,13 +102,10 @@ func (a *Adapter) Stop(ctx context.Context) (*adapter.StopResult, error) {
 		roomID = t.RoomID
 		res.RoomID = roomID
 	}
+
 	cli := NewClient()
-	if s, err := loadSession(); err == nil {
-		cli.applySession(s)
-		if roomID == "" {
-			roomID = s.RoomID
-			res.RoomID = roomID
-		}
+	if s, err := secrets.Load("xiaohongshu"); err == nil {
+		cli.LoadSecrets(s)
 	}
 	if roomID != "" && cli.AccessToken != "" {
 		if err := cli.StopRoom(roomID); err != nil {
@@ -127,11 +115,6 @@ func (a *Adapter) Stop(ctx context.Context) (*adapter.StopResult, error) {
 		}
 	}
 	_ = live.Remove("xiaohongshu")
-	// clear room from secrets
-	if s, err := loadSession(); err == nil {
-		s.RoomID = ""
-		_ = saveSession(s)
-	}
 	return res, nil
 }
 
@@ -140,6 +123,7 @@ func (a *Adapter) Status(ctx context.Context) (*adapter.StatusResult, error) {
 	out := &adapter.StatusResult{
 		Platform: string(platform.XiaoHongShu),
 		Status:   "idle",
+		Cookie:   "", // never export helper AT as danmaku cookie
 	}
 	if t, ok := live.Get("xiaohongshu"); ok && (t.Server != "" || t.Key != "") {
 		out.RoomID = t.RoomID
@@ -147,23 +131,20 @@ func (a *Adapter) Status(ctx context.Context) (*adapter.StatusResult, error) {
 		out.Key = t.Key
 		out.Status = "live"
 	}
+
 	cli := NewClient()
-	s, err := loadSession()
+	s, err := secrets.Load("xiaohongshu")
 	if err != nil {
 		return out, nil
 	}
-	cli.applySession(s)
-	out.Cookie = cli.CookieHeader()
+	cli.LoadSecrets(s)
+
 	ok, _ := cli.CheckLogin()
 	if !ok {
 		out.Status = "idle"
 		return out, nil
 	}
-	// stream info if we have room
 	roomID := out.RoomID
-	if roomID == "" {
-		roomID = s.RoomID
-	}
 	if roomID != "" {
 		if m, err := cli.StreamInfo(roomID); err == nil && bizOK(m) {
 			if data, _ := m["data"].(map[string]any); data != nil {

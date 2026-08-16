@@ -2,9 +2,7 @@ package xiaohongshu
 
 import (
 	"bytes"
-	"crypto/md5"
 	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,6 +10,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/xifan2333/webcast-mate/internal/secrets"
 )
 
 const (
@@ -25,34 +25,43 @@ const (
 )
 
 // Client is live-helper 4.4.0 HTTP client (CAS + robs + redobs).
+//
+// Auth material lives in secrets.File.Cookie as a cookie-like string
+// (same schema as bilibili/douyin). Format:
+//
+//	access-token=AT-…; device-id=…; a1=…; webId=…[; acw_tc=…]
+//
+// stdout JSON "cookie" stays empty — xhs danmaku uses browser cookies, not helper AT.
 type Client struct {
-	http        *http.Client
-	A1          string
-	WebID       string
+	http *http.Client
+
 	AccessToken string
 	DeviceID    string
+	A1          string
+	WebID       string
 	Subsystem   string
 	UserID      string
 	UserName    string
-	extraCookie map[string]string
-	// lastRoom from pre
+	extra       map[string]string // sticky browser cookies from Set-Cookie
+
+	// last pre
 	RoomID  string
 	PushURL string
 }
 
 func NewClient() *Client {
 	return &Client{
-		http:        &http.Client{Timeout: 30 * time.Second},
-		Subsystem:   "robs",
-		DeviceID:    randomMAC(),
-		extraCookie: map[string]string{},
+		http:      &http.Client{Timeout: 30 * time.Second},
+		Subsystem: "robs",
+		DeviceID:  randomMAC(),
+		extra:     map[string]string{},
 	}
 }
 
 func randomMAC() string {
 	b := make([]byte, 6)
 	_, _ = rand.Read(b)
-	b[0] |= 0x02 // local
+	b[0] |= 0x02
 	return fmt.Sprintf("%02x:%02x:%02x:%02x:%02x:%02x", b[0], b[1], b[2], b[3], b[4], b[5])
 }
 
@@ -69,27 +78,128 @@ func (c *Client) ensureIdentity() {
 	if c.Subsystem == "" {
 		c.Subsystem = "robs"
 	}
+	if c.extra == nil {
+		c.extra = map[string]string{}
+	}
 }
 
-// CookieHeader is secrets/stdout: cookie-like k=v list including AT + device-id + room.
-// Wire HTTP Cookie uses wireCookieHeader() (browser cookies only).
-func (c *Client) CookieHeader() string {
+// LoadSecrets applies secrets.File into the client (unified schema).
+func (c *Client) LoadSecrets(f *secrets.File) {
+	if f == nil {
+		return
+	}
+	c.UserID = f.UserID
+	c.UserName = f.UserName
+	c.applyCookieString(f.Cookie)
+}
+
+// SecretsFile builds the unified secrets.File for this client.
+func (c *Client) SecretsFile() *secrets.File {
+	return &secrets.File{
+		Cookie:   c.cookieString(),
+		UserID:   c.UserID,
+		UserName: c.UserName,
+		LoginAt:  time.Now().UTC(),
+	}
+}
+
+// cookieString is what we persist in secrets.File.Cookie (open-live auth only).
+func (c *Client) cookieString() string {
 	c.ensureIdentity()
-	parts := make([]string, 0, 12)
+	parts := make([]string, 0, 10)
 	if c.AccessToken != "" {
-		parts = append(parts, "access-token="+c.AccessToken, "auth="+c.AccessToken)
+		parts = append(parts, "access-token="+c.AccessToken)
 	}
 	if c.DeviceID != "" {
 		parts = append(parts, "device-id="+c.DeviceID)
 	}
-	if c.RoomID != "" {
-		parts = append(parts, "xhs-room-id="+c.RoomID)
+	parts = append(parts, "a1="+c.A1, "webId="+c.WebID)
+	for _, k := range []string{"acw_tc", "websectiga", "sec_poison_id", "gid", "web_session"} {
+		if v := c.extra[k]; v != "" {
+			parts = append(parts, k+"="+v)
+		}
 	}
-	parts = append(parts, c.wireCookieHeader())
+	for k, v := range c.extra {
+		switch k {
+		case "acw_tc", "websectiga", "sec_poison_id", "gid", "web_session",
+			"access-token", "auth", "device-id", "a1", "webId", "xsecappid":
+			continue
+		}
+		if v != "" {
+			parts = append(parts, k+"="+v)
+		}
+	}
 	return strings.Join(parts, "; ")
 }
 
-func (c *Client) wireCookieHeader() string {
+func (c *Client) applyCookieString(header string) {
+	if header == "" {
+		return
+	}
+	// legacy: JSON blob once shipped in Cookie field
+	if header[0] == '{' {
+		var m map[string]any
+		if json.Unmarshal([]byte(header), &m) == nil {
+			c.AccessToken = anyString(m["access_token"])
+			if c.AccessToken == "" {
+				c.AccessToken = anyString(m["access-token"])
+			}
+			if d := anyString(m["device_id"]); d != "" {
+				c.DeviceID = d
+			}
+			if a := anyString(m["a1"]); a != "" {
+				c.A1 = a
+			}
+			if w := anyString(m["web_id"]); w != "" {
+				c.WebID = w
+			}
+			if w := anyString(m["webId"]); w != "" {
+				c.WebID = w
+			}
+			if ex, ok := m["cookie_extra"].(map[string]any); ok {
+				for k, v := range ex {
+					if s := anyString(v); s != "" {
+						c.extra[k] = s
+					}
+				}
+			}
+			if uid := anyString(m["user_id"]); uid != "" && c.UserID == "" {
+				c.UserID = uid
+			}
+			if name := anyString(m["user_name"]); name != "" && c.UserName == "" {
+				c.UserName = name
+			}
+			return
+		}
+	}
+	for _, part := range strings.Split(header, ";") {
+		part = strings.TrimSpace(part)
+		k, v, ok := strings.Cut(part, "=")
+		if !ok {
+			continue
+		}
+		k, v = strings.TrimSpace(k), strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
+		switch strings.ToLower(k) {
+		case "access-token", "auth":
+			c.AccessToken = v
+		case "device-id":
+			c.DeviceID = v
+		case "a1":
+			c.A1 = v
+		case "webid":
+			c.WebID = v
+		case "xsecappid":
+			// fixed for helper
+		default:
+			c.extra[k] = v
+		}
+	}
+}
+
+func (c *Client) wireCookie() string {
 	c.ensureIdentity()
 	parts := []string{
 		"xsecappid=" + xsecAppLive,
@@ -97,14 +207,14 @@ func (c *Client) wireCookieHeader() string {
 		"webId=" + c.WebID,
 	}
 	for _, k := range []string{"acw_tc", "websectiga", "sec_poison_id", "gid", "web_session"} {
-		if v := c.extraCookie[k]; v != "" {
+		if v := c.extra[k]; v != "" {
 			parts = append(parts, k+"="+v)
 		}
 	}
-	for k, v := range c.extraCookie {
+	for k, v := range c.extra {
 		switch k {
-		case "xsecappid", "a1", "webId", "acw_tc", "websectiga", "sec_poison_id", "gid", "web_session",
-			"access-token", "auth", "device-id", "xhs-room-id":
+		case "acw_tc", "websectiga", "sec_poison_id", "gid", "web_session",
+			"access-token", "auth", "device-id", "a1", "webId", "xsecappid":
 			continue
 		}
 		if v != "" {
@@ -121,7 +231,7 @@ func (c *Client) cookieMap() map[string]string {
 		"a1":        c.A1,
 		"webId":     c.WebID,
 	}
-	for k, v := range c.extraCookie {
+	for k, v := range c.extra {
 		if v != "" {
 			m[k] = v
 		}
@@ -129,53 +239,10 @@ func (c *Client) cookieMap() map[string]string {
 	return m
 }
 
-// SessionBlob is in-memory session; secrets store CookieHeader() string only.
-type SessionBlob struct {
-	AccessToken string
-	DeviceID    string
-	A1          string
-	WebID       string
-	CookieExtra map[string]string
-	UserID      string
-	UserName    string
-	RoomID      string
-	LoginAt     time.Time
-}
-
-func (c *Client) applySession(s *SessionBlob) {
-	if s == nil {
-		return
-	}
-	c.AccessToken = s.AccessToken
-	if s.DeviceID != "" {
-		c.DeviceID = s.DeviceID
-	}
-	if s.A1 != "" {
-		c.A1 = s.A1
-	}
-	if s.WebID != "" {
-		c.WebID = s.WebID
-	}
-	if s.CookieExtra != nil {
-		c.extraCookie = s.CookieExtra
-	}
-	c.UserID = s.UserID
-	c.UserName = s.UserName
-	c.RoomID = s.RoomID
-}
-
-func (c *Client) sessionBlob() *SessionBlob {
-	return &SessionBlob{
-		AccessToken: c.AccessToken,
-		DeviceID:    c.DeviceID,
-		A1:          c.A1,
-		WebID:       c.WebID,
-		CookieExtra: c.extraCookie,
-		UserID:      c.UserID,
-		UserName:    c.UserName,
-		RoomID:      c.RoomID,
-		LoginAt:     time.Now().UTC(),
-	}
+type doOpts struct {
+	sign       bool
+	redobs     bool
+	originRobs bool
 }
 
 func (c *Client) do(
@@ -206,11 +273,9 @@ func (c *Client) do(
 		signPayload = m
 	}
 
-	// CAS needs x-s; redobs start/stop often work without, but we sign when a1 present.
 	needSign := opts.sign || strings.Contains(host, "customer.xiaohongshu")
 	var signHS map[string]string
 	if needSign {
-		// override global xsec for live-helper
 		prev := xsecAppID
 		xsecAppID = xsecAppLive
 		var err error
@@ -235,7 +300,7 @@ func (c *Client) do(
 	}
 	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Accept", "application/json, text/plain, */*")
-	req.Header.Set("Cookie", c.wireCookieHeader())
+	req.Header.Set("Cookie", c.wireCookie())
 	req.Header.Set("device-id", c.DeviceID)
 	req.Header.Set("subsystem", c.Subsystem)
 	if opts.originRobs {
@@ -268,7 +333,6 @@ func (c *Client) do(
 		return nil, err
 	}
 	defer resp.Body.Close()
-	// absorb set-cookie extras
 	for _, sc := range resp.Header.Values("Set-Cookie") {
 		part := strings.SplitN(sc, ";", 2)[0]
 		k, v, ok := strings.Cut(part, "=")
@@ -283,10 +347,7 @@ func (c *Client) do(
 		case "webId":
 			c.WebID = v
 		case "web_session", "acw_tc", "websectiga", "sec_poison_id", "gid":
-			if c.extraCookie == nil {
-				c.extraCookie = map[string]string{}
-			}
-			c.extraCookie[k] = v
+			c.extra[k] = v
 		}
 	}
 	raw, err := io.ReadAll(resp.Body)
@@ -299,12 +360,6 @@ func (c *Client) do(
 	}
 	out["_http"] = float64(resp.StatusCode)
 	return out, nil
-}
-
-type doOpts struct {
-	sign       bool
-	redobs     bool
-	originRobs bool
 }
 
 func truncate(s string, n int) string {
@@ -352,17 +407,11 @@ func bizOK(m map[string]any) bool {
 	if s, ok := m["success"].(bool); ok && s {
 		return true
 	}
-	if anyInt(m["code"]) == 0 && m["code"] != nil {
+	if m["code"] != nil && anyInt(m["code"]) == 0 {
 		return true
 	}
-	if anyInt(m["result"]) == 0 && m["result"] != nil {
+	if m["result"] != nil && anyInt(m["result"]) == 0 {
 		return true
 	}
 	return false
-}
-
-// md5 hex helper used if GenerateWebID missing edge
-func md5HexStr(s string) string {
-	sum := md5.Sum([]byte(s))
-	return hex.EncodeToString(sum[:])
 }
