@@ -24,7 +24,6 @@ func ResolveConfig(ctx context.Context, cli *Client, opts adapter.StartOpts) (*C
 		return cfg, nil
 	}
 
-	// Non-TTY: cannot prompt
 	if !isInteractive() {
 		if err := cfg.ValidateForStart(); err != nil {
 			return nil, fmt.Errorf("%w (non-interactive; pass -y with a complete config)", err)
@@ -34,11 +33,9 @@ func ResolveConfig(ctx context.Context, cli *Client, opts adapter.StartOpts) (*C
 
 	_ = path
 
-	// Prefer live category list when logged in; fall back to free text.
 	var areaOptions []huh.Option[string]
 	if areas, err := cli.ListAreas(); err == nil && len(areas) > 0 {
 		for _, a := range areas {
-			// User-facing: parent / child name only (no raw id in label)
 			label := a.Name
 			if a.ParentName != "" {
 				label = a.ParentName + " / " + a.Name
@@ -55,11 +52,11 @@ func ResolveConfig(ctx context.Context, cli *Client, opts adapter.StartOpts) (*C
 		areaV2 = "21"
 	}
 
-	// Note is the visible page heading (Group.Title is easy to clip with viewport height).
-	fields := []huh.Field{
-		huh.NewNote().
-			Title("开播设置").
-			Description("填写后将保存，下次可用 -y 跳过"),
+	// Split into groups so each step shows a clear heading.
+	// For 分区: huh Select.Height crops Title inside the field — use a Note
+	// as the only title, and leave Select without Height.
+	gBasic := huh.NewGroup(
+		huh.NewNote().Title("开播设置"),
 		huh.NewInput().
 			Title("直播间号").
 			Description("直播姬 / 直播中心显示的房间号（不是短号）").
@@ -74,37 +71,41 @@ func ResolveConfig(ctx context.Context, cli *Client, opts adapter.StartOpts) (*C
 			Title("标题").
 			Description("留空则不修改当前标题").
 			Value(&title),
-	}
+	)
 
+	var gArea *huh.Group
 	if len(areaOptions) > 0 {
-		// Height is the *whole* field (title + list). Too small clips Title("分区").
-		// Reserve ~3 lines for title/desc, rest for options.
-		fields = append(fields, huh.NewSelect[string]().
-			Title("分区").
-			Description("本次直播所属分区").
-			Options(areaOptions...).
-			Value(&areaV2).
-			Height(16).
-			Filtering(true))
+		gArea = huh.NewGroup(
+			huh.NewNote().Title("分区"),
+			huh.NewSelect[string]().
+				Description("选择本次直播所属分区").
+				Options(areaOptions...).
+				Value(&areaV2).
+				Filtering(true),
+		)
 	} else {
-		fields = append(fields, huh.NewInput().
-			Title("分区").
-			Description("未能拉取列表时，可填写分区编号").
-			Value(&areaV2).
-			Validate(func(s string) error {
-				if s == "" {
-					return fmt.Errorf("必填")
-				}
-				return nil
-			}))
+		gArea = huh.NewGroup(
+			huh.NewInput().
+				Title("分区").
+				Description("未能拉取列表时，可填写分区编号").
+				Value(&areaV2).
+				Validate(func(s string) error {
+					if s == "" {
+						return fmt.Errorf("必填")
+					}
+					return nil
+				}),
+		)
 	}
 
-	fields = append(fields, huh.NewInput().
-		Title("封面").
-		Description("已有封面图链接（可选，留空跳过）").
-		Value(&cover))
+	gCover := huh.NewGroup(
+		huh.NewInput().
+			Title("封面").
+			Description("已有封面图链接（可选，留空跳过）").
+			Value(&cover),
+	)
 
-	form := huh.NewForm(huh.NewGroup(fields...)).WithTheme(huh.ThemeCharm())
+	form := huh.NewForm(gBasic, gArea, gCover).WithTheme(huh.ThemeCharm())
 	if err := form.Run(); err != nil {
 		return nil, err
 	}
