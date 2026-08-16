@@ -248,3 +248,58 @@ func (c *Client) StopLive(roomID string) error {
 	}
 	return nil
 }
+
+// RoomLiveInfo is a remote room snapshot from get_info.
+type RoomLiveInfo struct {
+	RoomID     string
+	LiveStatus int // 0 idle, 1 live, 2 round
+	Title      string
+}
+
+// QueryRoomInfo hits GET room/v1/Room/get_info (public; cookie optional).
+func (c *Client) QueryRoomInfo(roomID string) (*RoomLiveInfo, error) {
+	if roomID == "" {
+		return nil, fmt.Errorf("empty room_id")
+	}
+	u := urlRoomInfo + "?room_id=" + url.QueryEscape(roomID)
+	b, err := c.doJSON("GET", u, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	var env apiEnvelope
+	if err := json.Unmarshal(b, &env); err != nil {
+		return nil, err
+	}
+	if env.Code != 0 {
+		msg := env.Message
+		if msg == "" {
+			msg = env.Msg
+		}
+		return nil, fmt.Errorf("get_info: %s (%d)", msg, env.Code)
+	}
+	var data struct {
+		RoomID     any    `json:"room_id"`
+		LiveStatus int    `json:"live_status"`
+		Title      string `json:"title"`
+	}
+	if err := json.Unmarshal(env.Data, &data); err != nil {
+		return nil, err
+	}
+	rid := anyToString(data.RoomID)
+	if rid == "" {
+		rid = roomID
+	}
+	return &RoomLiveInfo{RoomID: rid, LiveStatus: data.LiveStatus, Title: data.Title}, nil
+}
+
+// LiveStatusString maps bilibili live_status to our status field.
+func LiveStatusString(code int) string {
+	switch code {
+	case 1:
+		return "live"
+	case 2:
+		return "round"
+	default:
+		return "idle"
+	}
+}

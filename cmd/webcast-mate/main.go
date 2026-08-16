@@ -10,11 +10,8 @@ import (
 	"github.com/xifan2333/webcast-mate/internal/adapter"
 	"github.com/xifan2333/webcast-mate/internal/adapter/bilibili"
 	"github.com/xifan2333/webcast-mate/internal/adapter/stub"
-	"github.com/xifan2333/webcast-mate/internal/appcfg"
 	"github.com/xifan2333/webcast-mate/internal/appdir"
-	"github.com/xifan2333/webcast-mate/internal/live"
 	"github.com/xifan2333/webcast-mate/internal/platform"
-	"github.com/xifan2333/webcast-mate/internal/secrets"
 )
 
 // version is overridden at link time:
@@ -151,16 +148,17 @@ OUTPUT
 
 func cmdStatus(args []string) int {
 	if hasHelp(args) {
-		fmt.Print(`Show current live session for a platform.
+		fmt.Print(`Query live status on the platform.
 
-Same JSON fields as start success (platform, room_id, cookie, server, key).
-Reads live.json + secrets; does not call remote APIs.
+Calls the platform room API for status (live|idle|…).
+Fills cookie/server/key from local secrets + live.json when present
+(same field names as start).
 
 USAGE
   webcast-mate status <platform>
 
 OUTPUT
-  {"platform":"…","room_id":"…","cookie":"…","server":"…","key":"…","status":"live|idle"}
+  {"platform":"…","room_id":"…","cookie":"…","server":"…","key":"…","status":"live|idle|round"}
 `)
 		return 0
 	}
@@ -168,33 +166,17 @@ OUTPUT
 	if code != 0 {
 		return code
 	}
-	out := statusResult{Platform: string(id), Status: "idle"}
-
-	if t, ok := live.Get(string(id)); ok && (t.Server != "" || t.Key != "") {
-		out.RoomID = t.RoomID
-		out.Server = t.Server
-		out.Key = t.Key
-		out.Status = "live"
+	a, ok := registry().Get(id)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "no adapter for %s\n", id)
+		return 1
 	}
-	if s, err := secrets.Load(string(id)); err == nil && s != nil {
-		out.Cookie = s.Cookie
+	res, err := a.Status(context.Background())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return exitCode(err)
 	}
-	// fill room_id from config when not live
-	if out.RoomID == "" {
-		if f, err := appcfg.Load(); err == nil {
-			out.RoomID = f.GetPlatform(string(id)).RoomID
-		}
-	}
-	return printJSON(out)
-}
-
-type statusResult struct {
-	Platform string `json:"platform"`
-	RoomID   string `json:"room_id"`
-	Cookie   string `json:"cookie"`
-	Server   string `json:"server"`
-	Key      string `json:"key"`
-	Status   string `json:"status"` // live | idle
+	return printJSON(res)
 }
 
 func cmdStop(args []string) int {

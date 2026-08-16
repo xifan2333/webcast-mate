@@ -108,6 +108,55 @@ func (a *Adapter) Stop(ctx context.Context) (*adapter.StopResult, error) {
 	return res, nil
 }
 
+func (a *Adapter) Status(ctx context.Context) (*adapter.StatusResult, error) {
+	_ = ctx
+	out := &adapter.StatusResult{
+		Platform: string(platform.Bilibili),
+		Status:   "idle",
+	}
+
+	// local cookie
+	if s, err := secrets.Load("bilibili"); err == nil && s != nil {
+		out.Cookie = s.Cookie
+	}
+	// local push fields if we started this session
+	if t, ok := live.Get("bilibili"); ok {
+		out.Server = t.Server
+		out.Key = t.Key
+		if t.RoomID != "" {
+			out.RoomID = t.RoomID
+		}
+	}
+
+	roomID := out.RoomID
+	if roomID == "" {
+		if f, err := appcfg.Load(); err == nil {
+			roomID = f.GetPlatform("bilibili").RoomID
+		}
+	}
+	if roomID == "" {
+		return nil, fmt.Errorf("%w: room_id unknown (set platforms.bilibili.room_id or start first)", ErrNotConfigured)
+	}
+	out.RoomID = roomID
+
+	cli, err := NewClient()
+	if err != nil {
+		return nil, err
+	}
+	if out.Cookie != "" {
+		_ = cli.setCookieHeader(out.Cookie)
+	}
+	info, err := cli.QueryRoomInfo(roomID)
+	if err != nil {
+		return nil, err
+	}
+	if info.RoomID != "" {
+		out.RoomID = info.RoomID
+	}
+	out.Status = LiveStatusString(info.LiveStatus)
+	return out, nil
+}
+
 func mapErr(err error) error {
 	if err == nil {
 		return nil

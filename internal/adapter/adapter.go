@@ -22,6 +22,17 @@ type StopResult struct {
 	Status   string `json:"status"` // always "stopped"
 }
 
+// StatusResult is stdout for `status` — same core fields as start, plus remote status.
+type StatusResult struct {
+	Platform string `json:"platform"`
+	RoomID   string `json:"room_id"`
+	Cookie   string `json:"cookie"`
+	Server   string `json:"server"`
+	Key      string `json:"key"`
+	// Status from platform query: live | idle | round (bilibili 轮播), etc.
+	Status string `json:"status"`
+}
+
 // Adapter is the only platform extension point.
 type Adapter interface {
 	ID() platform.ID
@@ -31,6 +42,8 @@ type Adapter interface {
 	Start(ctx context.Context, opts StartOpts) (*StartResult, error)
 	// Stop ends the live session. Missing room must return success (idempotent).
 	Stop(ctx context.Context) (*StopResult, error)
+	// Status queries the platform for live state; fills cookie/server/key from local when known.
+	Status(ctx context.Context) (*StatusResult, error)
 }
 
 // Registry maps platform id → adapter.

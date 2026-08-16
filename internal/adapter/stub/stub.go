@@ -32,3 +32,8 @@ func (s *Stub) Stop(ctx context.Context) (*adapter.StopResult, error) {
 		Status:   "stopped",
 	}, nil
 }
+
+func (s *Stub) Status(ctx context.Context) (*adapter.StatusResult, error) {
+	_ = ctx
+	return nil, fmt.Errorf("%s: status not implemented yet", s.id)
+}
