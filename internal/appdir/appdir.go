@@ -83,21 +83,3 @@ func RunDir() (string, error) {
 	}
 	return d, nil
 }
-
-// DouyinKeepalivePID path for the background LIVING + token/beat process.
-func DouyinKeepalivePID() (string, error) {
-	d, err := RunDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(d, "douyin-keepalive.pid"), nil
-}
-
-// DouyinKeepaliveLog is stderr for the detached keepalive child.
-func DouyinKeepaliveLog() (string, error) {
-	d, err := RunDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(d, "douyin-keepalive.log"), nil
-}

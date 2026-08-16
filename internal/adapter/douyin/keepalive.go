@@ -33,6 +33,22 @@ const (
 	tokenBeatInterval = 5 * time.Minute
 )
 
+func keepalivePIDPath() (string, error) {
+	d, err := appdir.RunDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(d, "douyin-keepalive.pid"), nil
+}
+
+func keepaliveLogPath() (string, error) {
+	d, err := appdir.RunDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(d, "douyin-keepalive.log"), nil
+}
+
 func StartKeepalive() error {
 	_ = StopKeepalive()
 	exe, err := os.Executable()
@@ -42,7 +58,7 @@ func StartKeepalive() error {
 	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
 		exe = resolved
 	}
-	logPath, err := appdir.DouyinKeepaliveLog()
+	logPath, err := keepaliveLogPath()
 	if err != nil {
 		return err
 	}
@@ -59,7 +75,7 @@ func StartKeepalive() error {
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("keepalive start: %w", err)
 	}
-	pidPath, err := appdir.DouyinKeepalivePID()
+	pidPath, err := keepalivePIDPath()
 	if err != nil {
 		_ = cmd.Process.Kill()
 		return err
@@ -73,7 +89,7 @@ func StartKeepalive() error {
 }
 
 func StopKeepalive() error {
-	pidPath, err := appdir.DouyinKeepalivePID()
+	pidPath, err := keepalivePIDPath()
 	if err != nil {
 		return err
 	}
