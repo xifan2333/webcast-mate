@@ -12,11 +12,24 @@ const urlAreaList = "https://api.live.bilibili.com/room/v1/Area/getList?show_pin
 type Area struct {
 	ID         string
 	Name       string
+	ParentID   string
 	ParentName string
 }
 
-// ListAreas fetches leaf areas for the select UI.
-func (c *Client) ListAreas() ([]Area, error) {
+// AreaParent is a top-level partition (网游 / 手游 / 娱乐 …).
+type AreaParent struct {
+	ID   string
+	Name string
+}
+
+// AreaTree is the two-level partition list for UI.
+type AreaTree struct {
+	Parents  []AreaParent
+	Children map[string][]Area // parentID → leaves
+}
+
+// ListAreaTree fetches parent + child partitions.
+func (c *Client) ListAreaTree() (*AreaTree, error) {
 	b, err := c.doJSON("GET", urlAreaList, nil, nil)
 	if err != nil {
 		return nil, err
@@ -30,6 +43,7 @@ func (c *Client) ListAreas() ([]Area, error) {
 			List []struct {
 				ID         any    `json:"id"`
 				Name       string `json:"name"`
+				ParentID   any    `json:"parent_id"`
 				ParentName string `json:"parent_name"`
 			} `json:"list"`
 		} `json:"data"`
@@ -40,21 +54,62 @@ func (c *Client) ListAreas() ([]Area, error) {
 	if env.Code != 0 {
 		return nil, fmt.Errorf("area list: %s (%d)", env.Message, env.Code)
 	}
-	var out []Area
+
+	tree := &AreaTree{
+		Children: make(map[string][]Area),
+	}
 	for _, p := range env.Data {
+		pid := anyToString(p.ID)
+		if pid == "" {
+			continue
+		}
+		tree.Parents = append(tree.Parents, AreaParent{ID: pid, Name: p.Name})
 		for _, ch := range p.List {
 			id := anyToString(ch.ID)
 			if id == "" {
 				continue
 			}
-			parent := ch.ParentName
-			if parent == "" {
-				parent = p.Name
+			parentName := ch.ParentName
+			if parentName == "" {
+				parentName = p.Name
 			}
-			out = append(out, Area{ID: id, Name: ch.Name, ParentName: parent})
+			tree.Children[pid] = append(tree.Children[pid], Area{
+				ID:         id,
+				Name:       ch.Name,
+				ParentID:   pid,
+				ParentName: parentName,
+			})
 		}
 	}
+	return tree, nil
+}
+
+// ListAreas is a flat leaf list (legacy).
+func (c *Client) ListAreas() ([]Area, error) {
+	tree, err := c.ListAreaTree()
+	if err != nil {
+		return nil, err
+	}
+	var out []Area
+	for _, p := range tree.Parents {
+		out = append(out, tree.Children[p.ID]...)
+	}
 	return out, nil
+}
+
+// FindParentOf returns parent id for a leaf area id.
+func (t *AreaTree) FindParentOf(leafID string) string {
+	if t == nil {
+		return ""
+	}
+	for pid, kids := range t.Children {
+		for _, k := range kids {
+			if k.ID == leafID {
+				return pid
+			}
+		}
+	}
+	return ""
 }
 
 func anyToString(v any) string {
