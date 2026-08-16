@@ -484,3 +484,256 @@ addon：`reference/mitm_login_capture.py`（全量 HTTP(S)；登录关键路径�
 
 - 改 Douyin URL/字段/状态机 → **先改本文**，再改 `internal/adapter/douyin/`。  
 - 新抓包若与本文冲突，以 **新全量抓包 + 对应 JS 符号** 为准并更新本节日期。  
+
+---
+
+## 9. 参数分层：每一层从哪来（静态）
+
+> 目的：实现时知道「该自己生成 / 该缓存 / 该抄常量 / 必须调运行时 SDK」，避免再猜字段。
+
+### 9.1 两套管线（不要混）
+
+```text
+┌─ 登录 HTTP ─────────────────────────────────────────────┐
+│ UI 38514  getQrcodeRequest / checkQrconnectRequest        │
+│   → commonRequest（38514）                                │
+│       合并 aid + is_from_iesaccountsaas                   │
+│   → account / webAccount SDK .request（18610 拦截器栈）   │
+│       + 面板构造参数（29382：did/iid/app_name=assistant…） │
+│       + browserInfo → account_sdk_source_info             │
+│       + p_bd/p_ver/p_js_* / request_host / biz_trace_id   │
+│       + bdms/sdk_glue 运行时 → a_bogus（源码无字面量）      │
+└───────────────────────────────────────────────────────────┘
+
+┌─ 开播 HTTP ─────────────────────────────────────────────┐
+│ 业务 96458/93230  callAPI({api, method, param})           │
+│   → getCommonParams / URL 拼装（93230 模块 80814）         │
+│       ENV_INFO + appStore.appInfo                         │
+│       + 路径相关 extra_*（仅 create/create_info/speed_test）│
+│   → axios/fetch（credentials:include）                    │
+│   → bdms 对 include 路径注入 a_bogus（/webcast/*）         │
+│   → 写接口另带 x-secsdk-csrf-token（抓包可见；主进程 cookie）│
+└───────────────────────────────────────────────────────────┘
+```
+
+**同一次进程里 `DEVICE_ID`/`INSTALL_ID` 共用**；登录 query 字段名是 `did`，开播是 `device_id`，值相同。
+
+### 9.2 设备 ID / Install ID（最底层，主进程）
+
+**文件：** `resources/app/index.js` · `deviceIdManage`
+
+```text
+启动 → deviceIdManage(appStore)
+  读 appStore.appInfo.{DEVICE_ID, INSTALL_ID, CHECK_CODE, CHANNEL, APP_ID, …}
+  CHECK_CODE = `${channel}-${appVersion}-${aid}-${deviceId}[-BOE]`
+  若 did 有效且 CHECK_CODE 未变且 iid 长度>1 → 直接复用，不重新注册
+  否则:
+    POST {DOMAIN}/service/2/desktop/device_register/
+      入参（经 native helper k(e)）:
+        aid, channel, package="webcast_mate",
+        version=3, sub_version=3,
+        key="I+D&*76:j27kVH<us9&d",   // 固定盐，给 native 注册用
+        app_name=encodeURIComponent("直播伴侣"),
+        app_version, device_id, install_id, registryUrl
+    响应: device_id_str, install_id_str, device_model, os_mac, …
+    再 POST …/service/2/app_alert_check/ 做激活
+    写回 appStore.appInfo + 新 CHECK_CODE
+```
+
+| 存储 | 路径 |
+|------|------|
+| 运行时 | `window.__STORE__.appStore.appInfo.DEVICE_ID` / `INSTALL_ID` |
+| 落盘 | `AppData/Roaming/webcast_mate/WBStore/appStore.json`（及 storeBackup） |
+
+抓包样例：`did=2064230385197255`，`iid=2064230385201351`。
+
+实现含义：
+- **did/iid 应稳定持久化**（对齐 companion 的 device 注册语义），不要每次随机新 ID 却又和 Wine 共用一个桶。
+- 完整复刻可打 `device_register`；最小可用是「自管一对稳定 did/iid」，但风控画像会弱于真注册。
+
+### 9.3 开播公共 query（`callAPI` → `getCommonParams`）
+
+**文件：** `93230` 导出 `getCommonParams` / URL builder（模块约 80814）
+
+```text
+getCommonParams():
+  ENV_INFO = main bridge call("ENV_INFO")   // 缓存
+  取 ENV_INFO 子集:
+    ac, app_name, version_code, device_platform,
+    webcast_sdk_version, resolution, os_version, language
+  再并上 appInfo:
+    aid=APP_ID, live_id=LIVE_ID, channel=CHANNEL,
+    device_id=DEVICE_ID, iid=INSTALL_ID
+```
+
+**ENV_INFO 主进程构造（`index.js`）近似：**
+
+```text
+ac: "wifi"
+app_name: package.json name          // 实际抓包 app_name=webcast_mate
+version_code: package version        // 12.7.3
+device_platform: "windows"
+resolution: primaryDisplay width*height
+os_version: process.getSystemVersion()
+os_username / os_arch / software_arch
+webcast_sdk_version: 1520            // 写死
+language: "zh"
+device_id: appInfo.DEVICE_ID（可空）
+```
+
+**URL 拼装：**
+
+```text
+base = DOMAIN + api          // DOMAIN 默认 https://webcast.amemv.com
+query = getCommonParams() ∪ customQuery ∪ pathExtra(api)
+GET 时 body param 也可并进 query
+最终: base + "?" + stringify(query)
+```
+
+**域名容灾（`callAPIV2`）：**
+`webcast.amemv.com` 失败时可换 `webcast-pc.amemv.com` / `webcast-normal.amemv.com`（仅 GET 超时类）。  
+**本次成功抓包主 host 是 `webcast.amemv.com`。**
+
+### 9.4 开播路径附加 query（`parseExtraLiveStreamSchedulingQuery`）
+
+**仅当 api ∈**
+
+```text
+/webcast/room/create_info/
+/webcast/room/create/
+/webcast/room/push_stream/speed_test/
+```
+
+才附加：
+
+| 键 | 来源 |
+|----|------|
+| `extra_first_tag_id` | `userStore.anchorTags.first_tag_id`（vertical_label 等预拉） |
+| `extra_second_tag_id` | 同上 second |
+| `extra_third_tag_id` | 同上 third |
+| `extra_encoder_core` | settings 视频编码 core，lower |
+| `extra_codec_name` | 编码名 lower |
+| `extra_codec_is_ex` | 名是否 `_EX` 后缀 |
+| `extra_use_265` | 是否 265 |
+| `extra_login_option` | 仅 PICO 登录源 |
+
+普通 `ping/anchor`、`user/me` **没有**这组 extra_*（与抓包一致：ping query 更短）。
+
+### 9.5 开播 Header
+
+| Header | 来源 |
+|--------|------|
+| `Content-Type` | 默认 `application/x-www-form-urlencoded; charset=UTF-8` |
+| `Cookie` | jar / `credentials:"include"`（桌面 session） |
+| `User-Agent` | Electron 壳 `webcast_mate/12.7.3 …` |
+| `x-secsdk-csrf-token` | 登录后写接口抓包可见；与 `csrf_session_id` cookie 同期出现（secsdk 运行时，非 38514） |
+| `X-TT-ENV` / `X-USE-PPE` / `X-USE-BOE` | 仅非 prod / BOE |
+
+`callAPINative`：`noCommonParams + noCommonHeaders`，给已拼好整 URL 的调用。
+
+### 9.6 登录参数栈（passport）
+
+#### 业务层（38514）
+
+| 调用 | 显式 params/data |
+|------|------------------|
+| `getQrcodeRequest` | `next`, `need_logo=false`, `need_short_url=false`, `is_new_login=1` |
+| `checkQrconnectRequest` | 上列 + `token`, `is_frontier`（轮询写死 true）；web scope 的 `next` |
+| 出码前 | `generateVerifyPortraitId()` |
+
+`commonRequest` 只保证再并：`aid`、`is_from_iesaccountsaas=1`（+ 可选 `is_vcd`）。
+
+#### 面板 / 账号构造（29382 等）
+
+```text
+APP_ID.AWEME(2079) → app_name 映射 "aweme_live_assistant"
+登录面板: aid, did=DEVICE_ID, iid=INSTALL_ID,
+  host/domain = streamingtool 域名函数,
+  loginType=["LOGIN_MOBILE_CODE"], captchaHost, …
+```
+
+抓包 passport query 用 **`did=`**（不是 device_id）。部分旧 helper 映射里有 `device_id: did` + `fp: verify_${did}`，**以抓包键名为准**。
+
+#### SDK 拦截器（18610）
+
+| 参数 | 来源（静态） |
+|------|----------------|
+| `account_sdk_source_info` | `JSON.stringify(browserInfo)` 再自定义编码 `c(...)`；`browserInfo` 异步收集 |
+| `p_bd` | `window._sdkGlueVersionMap.bdmsVersion`（抓包 `1.0.1.20`） |
+| `p_ver` / `p_js_v` / `p_js_t` / `p_zt` | SDK/`$SECURE_VERSION` 常量钉 |
+| `request_host` | `encodeURIComponent(location.origin)` → Electron 下常为 `file://` |
+| `biz_trace_id` | 本地 trace 对象；同时可打 header `x-tt-passport-trace-id` |
+| `passport_jssdk_version` / `type` | 拦截器默认（抓包 2.4.13 / normal；包内另有 4.2.3/lite 分支） |
+
+**源码字符串里没有 `a_bogus` 字面量。** 登录/开播 URL 上的 `a_bogus` 来自运行时 bdms（见 §9.7）。
+
+### 9.7 签名：`a_bogus` / `X-Bogus` / bdms（运行时）
+
+#### 加载（`2301.721857f5.js`）
+
+```text
+window._SdkGlueInit({
+  self: { aid: 2079, pageId: 40236 },   // aid→pageId 表：2079→40236
+  bdms: {
+    paths: { include: ["/webcast/*", …按容器类型追加] },
+    ddrt: 3,
+    aid, pageId
+  }
+})
+// 动态插入 script；版本进 window._sdkGlueVersionMap.bdmsVersion → 登录 p_bd
+```
+
+对 **webcast 业务**：bdms `include` 至少覆盖 `"/webcast/*"`，因此
+`create_info` / `create` / `ping/anchor` 等都会被自动加签到 query（抓包每条都有 `a_bogus`）。
+
+对 **passport**：同样走页面内 sdk_glue / 账号 SDK 请求栈，get_qrcode / check_qrconnect 的 query 也带 `a_bogus`（抓包证实）；**不是** 38514 手写字段。
+
+#### 另一类：`window.byted_acrawler.frontierSign`（IM 等）
+
+```text
+// 12105 / 5914 / 71047 等
+stub = { "X-MS-STUB": md5( selected_param_values_joined ) }
+out  = byted_acrawler.frontierSign(stub)
+// 若返回 X-Bogus → 改名为 signature 并进 query
+```
+
+这是 **长连接/IM fetch** 路径，与开播 `room/create` 主链的 `a_bogus` 不是同一处拼装，但同属字节 acrawler/bdms 家族。
+
+#### 实现含义
+
+| 能力 | 静态能否直接抄 | 说明 |
+|------|----------------|------|
+| did/iid | 半可以 | 应用 `device_register` 或稳定自管 |
+| ENV 公共 query | 可以 | 常量 + 分辨率/系统 |
+| extra_* | 可以 | 分区标签 + 本地编码设置 |
+| create body | 可以 | 96458 组 `z` 的规则 |
+| ping body | 可以 | room_id/stream_id/status |
+| 登录业务 body | 可以 | token/is_frontier/next… |
+| account_sdk_source_info | 难 | browserInfo 编码 |
+| **a_bogus** | **否（纯静态）** | 必须 bdms/glue 或等价实现；登录+开播都要 |
+| x-secsdk-csrf | 运行时 | 随登录 cookie/secsdk |
+
+### 9.8 从「参数来源」看最小复刻顺序
+
+1. **设备**：`device_register`（或持久 did/iid）→ 写入本地配置  
+2. **会话**：passport 登录（业务字段按 §1 + §9.6；**a_bogus 必接**）→ secrets.cookie  
+3. **开播 query**：getCommonParams 等价物 + create 路径 extra_* + **a_bogus**  
+4. **开播 body**：create_info → pre_schedule_key → create body（§2.4）  
+5. **状态**：ping 2 / ping 4（§2.5 / §3）  
+
+没有第 2 步的 a_bogus，只改 `is_frontier` 或轮询间隔，**不能**称为对齐伴侣。
+
+### 9.9 关键源码索引（参数层）
+
+| 主题 | 位置 |
+|------|------|
+| device 注册 | `app/index.js` `deviceIdManage` → `…/desktop/device_register/` |
+| ENV_INFO | `app/index.js`（ac/wifi/resolution/sdk 1520…） |
+| getCommonParams / callAPI URL | `resource/js/93230.*.js` |
+| extra_* 调度参数 | `93230` `parseExtraLiveStreamSchedulingQuery` |
+| create body / ping / overLiving | `96458.*.js` |
+| 扫码 UI / frontier 轮询 | `38514.*.js` |
+| assistant app_name / did | `29382.*.js` |
+| passport 拦截器 p_bd / source_info | `18610.*.js` |
+| bdms glue 加载与 include | `2301.*.js` |
+| IM X-Bogus frontierSign | `12105` / `5914` / `71047` 等 |
