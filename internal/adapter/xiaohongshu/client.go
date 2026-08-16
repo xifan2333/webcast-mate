@@ -71,18 +71,39 @@ func (c *Client) ensureIdentity() {
 	}
 }
 
+// CookieHeader is the HTTP Cookie header string for stdout / wire requests.
+// Includes a1/webId/xsecappid + sticky extras; access_token is also appended as
+// access-token= / auth= so downstream tools that only get "cookie" can recover AT.
+func (c *Client) CookieHeader() string {
+	return c.cookieHeader()
+}
+
 func (c *Client) cookieHeader() string {
 	c.ensureIdentity()
-	parts := []string{
-		"xsecappid=" + xsecAppLive,
-		"a1=" + c.A1,
-		"webId=" + c.WebID,
+	parts := make([]string, 0, 8)
+	if c.AccessToken != "" {
+		// not browser cookies, but helper auth often travels with cookie field in our CLI
+		parts = append(parts, "access-token="+c.AccessToken, "auth="+c.AccessToken)
+	}
+	parts = append(parts,
+		"xsecappid="+xsecAppLive,
+		"a1="+c.A1,
+		"webId="+c.WebID,
+	)
+	// stable-ish order for extras
+	for _, k := range []string{"acw_tc", "websectiga", "sec_poison_id", "gid", "web_session"} {
+		if v := c.extraCookie[k]; v != "" {
+			parts = append(parts, k+"="+v)
+		}
 	}
 	for k, v := range c.extraCookie {
-		if k == "xsecappid" || k == "a1" || k == "webId" || v == "" {
+		switch k {
+		case "xsecappid", "a1", "webId", "acw_tc", "websectiga", "sec_poison_id", "gid", "web_session", "access-token", "auth":
 			continue
 		}
-		parts = append(parts, k+"="+v)
+		if v != "" {
+			parts = append(parts, k+"="+v)
+		}
 	}
 	return strings.Join(parts, "; ")
 }

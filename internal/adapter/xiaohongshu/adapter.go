@@ -91,16 +91,10 @@ func (a *Adapter) Start(ctx context.Context, opts adapter.StartOpts) (*adapter.S
 		return nil, err
 	}
 
-	// Cookie field: expose AT blob for downstream (danmaku may need separate tourist path)
-	cookie := cli.AccessToken
-	if b, err := jsonMarshalSession(cli.sessionBlob()); err == nil {
-		cookie = string(b)
-	}
-
 	return &adapter.StartResult{
 		Platform: string(platform.XiaoHongShu),
 		RoomID:   roomID,
-		Cookie:   cookie,
+		Cookie:   cli.CookieHeader(),
 		Server:   server,
 		Key:      key,
 	}, nil
@@ -159,9 +153,7 @@ func (a *Adapter) Status(ctx context.Context) (*adapter.StatusResult, error) {
 		return out, nil
 	}
 	cli.applySession(s)
-	if b, err := jsonMarshalSession(s); err == nil {
-		out.Cookie = string(b)
-	}
+	out.Cookie = cli.CookieHeader()
 	ok, _ := cli.CheckLogin()
 	if !ok {
 		out.Status = "idle"
@@ -183,8 +175,4 @@ func (a *Adapter) Status(ctx context.Context) (*adapter.StatusResult, error) {
 		}
 	}
 	return out, nil
-}
-
-func jsonMarshalSession(s *SessionBlob) ([]byte, error) {
-	return jsonMarshal(s)
 }
