@@ -170,8 +170,12 @@ func (c *Client) loginQR(ctx context.Context) (*secrets.File, error) {
 	}
 	printQR(qrURL)
 
-	deadline := time.Now().Add(3 * time.Minute)
+	// Align with ~/douyin-live/login.py poll_until_login:
+	// error 7 = 访问太频繁 → wait 8s, do NOT re-issue QR
+	// 2156/1105 = 系统繁忙 → wait 3s
+	deadline := time.Now().Add(4 * time.Minute)
 	last := ""
+	scanned := false
 	interval := time.Second
 	for {
 		if err := ctx.Err(); err != nil {
@@ -186,68 +190,92 @@ func (c *Client) loginQR(ctx context.Context) (*secrets.File, error) {
 			sleep(ctx, interval)
 			continue
 		}
-		// retryable busy after confirm
-		if errCode == 2156 || errCode == 7 || errCode == 1105 {
-			if last != "busy" {
-				fmt.Fprintf(os.Stderr, "douyin: server busy (%d), retrying slower…\n", errCode)
-				last = "busy"
+		// Session may already be set while API still returns busy after confirm.
+		if cookieHasSession(c.cookieHeader()) && (scanned || errCode == 7 || errCode == 2156 || st == "confirmed") {
+			return c.finishLogin("")
+		}
+		// retryable — same waits as login.py (7 → 8s, others → 3s)
+		if errCode == 7 || errCode == 2156 || errCode == 1105 {
+			wait := 3 * time.Second
+			if errCode == 7 {
+				wait = 8 * time.Second
 			}
-			interval = 2 * time.Second
-			sleep(ctx, interval)
+			if last != fmt.Sprintf("busy-%d", errCode) {
+				fmt.Fprintf(os.Stderr, "douyin: %d rate-limit/busy — wait %ds, keep same QR (do not rescan)\n",
+					errCode, int(wait.Seconds()))
+				last = fmt.Sprintf("busy-%d", errCode)
+			}
+			// stretch deadline while backing off after scan/confirm
+			if scanned {
+				deadline = deadline.Add(wait)
+			}
+			sleep(ctx, wait)
 			continue
 		}
 		if st != last {
 			last = st
 			switch st {
-			case "new", "1":
+			case "new":
 				fmt.Fprintln(os.Stderr, "douyin: waiting for scan…")
-			case "scanned", "2":
+			case "scanned":
+				scanned = true
+				interval = 2 * time.Second
 				fmt.Fprintln(os.Stderr, "douyin: scanned — confirm on phone")
-				interval = 1500 * time.Millisecond
-			case "confirmed", "3":
+			case "confirmed":
 				fmt.Fprintln(os.Stderr, "douyin: confirmed")
-			case "refused", "4":
+			case "refused":
 				return nil, ErrQRRefused
-			case "expired", "5":
+			case "expired":
 				return nil, ErrQRExpired
 			default:
-				fmt.Fprintf(os.Stderr, "douyin: status=%s\n", st)
+				if st != "" {
+					fmt.Fprintf(os.Stderr, "douyin: status=%s\n", st)
+				}
 			}
 		}
-		if st == "confirmed" || st == "3" {
+		if st == "confirmed" {
 			if redirect != "" {
-				// follow to settle cookies
 				_, _ = c.do("GET", redirect, nil, "", nil)
 			}
-			// small settle
 			sleep(ctx, 500*time.Millisecond)
-			if !cookieHasSession(c.cookieHeader()) {
-				return nil, fmt.Errorf("confirmed but no session cookie")
-			}
-			_, uid, name := c.checkSession()
-			s := &secrets.File{
-				Cookie:   c.cookieHeader(),
-				UserID:   uid,
-				UserName: name,
-				LoginAt:  time.Now().UTC(),
-			}
-			if err := secrets.Save("douyin", s); err != nil {
-				return nil, err
-			}
-			if name != "" {
-				fmt.Fprintf(os.Stderr, "douyin: logged in as %s\n", name)
-			}
-			fmt.Fprintln(os.Stderr, "douyin: QR login ok")
-			return s, nil
+			return c.finishLogin(redirect)
 		}
-		if st == "expired" || st == "5" {
+		if st == "expired" {
 			return nil, ErrQRExpired
 		}
-		if st == "refused" || st == "4" {
+		if st == "refused" {
 			return nil, ErrQRRefused
+		}
+		if scanned {
+			interval = 2 * time.Second
 		}
 		sleep(ctx, interval)
 	}
+}
+
+func (c *Client) finishLogin(redirect string) (*secrets.File, error) {
+	if redirect != "" {
+		_, _ = c.do("GET", redirect, nil, "", nil)
+	}
+	if !cookieHasSession(c.cookieHeader()) {
+		// one more account probe may set nothing; still fail clearly
+		return nil, fmt.Errorf("login settled but no session cookie yet")
+	}
+	_, uid, name := c.checkSession()
+	s := &secrets.File{
+		Cookie:   c.cookieHeader(),
+		UserID:   uid,
+		UserName: name,
+		LoginAt:  time.Now().UTC(),
+	}
+	if err := secrets.Save("douyin", s); err != nil {
+		return nil, err
+	}
+	if name != "" {
+		fmt.Fprintf(os.Stderr, "douyin: logged in as %s\n", name)
+	}
+	fmt.Fprintln(os.Stderr, "douyin: QR login ok")
+	return s, nil
 }
 
 // getQRCode returns poll token and a URL suitable for terminal QR (same as bili/xhs).
@@ -317,17 +345,34 @@ func (c *Client) checkQR(token string) (status, redirect string, errCode int, er
 	}
 	data := mapData(m)
 	if data == nil {
-		return "", "", 0, fmt.Errorf("check_qrconnect: %v", m)
-	}
-	if ec, ok := data["error_code"].(float64); ok && ec != 0 {
-		errCode = int(ec)
-		// retryable still return status empty
-		if errCode == 2156 || errCode == 7 || errCode == 1105 {
+		// top-level error_code sometimes
+		errCode = anyInt(m["error_code"])
+		if errCode == 0 {
+			errCode = anyInt(m["status_code"])
+		}
+		if errCode == 7 || errCode == 2156 || errCode == 1105 {
 			return "", "", errCode, nil
 		}
+		return "", "", 0, fmt.Errorf("check_qrconnect: %v", m)
+	}
+	errCode = anyInt(data["error_code"])
+	msg, _ := m["message"].(string)
+	// login.py: message != success + retryable error_code → backoff
+	if msg != "" && msg != "success" && (errCode == 7 || errCode == 2156 || errCode == 1105) {
+		return "", "", errCode, nil
+	}
+	if errCode == 7 || errCode == 2156 || errCode == 1105 {
+		return "", "", errCode, nil
+	}
+	if errCode != 0 {
+		// non-retryable business error
+		desc := anyString(data["description"])
+		if desc == "" {
+			desc = anyString(data["captcha"])
+		}
+		return "", "", errCode, fmt.Errorf("check_qrconnect error_code=%d %s", errCode, desc)
 	}
 	status = anyString(data["status"])
-	// normalize numeric
 	switch status {
 	case "1":
 		status = "new"
@@ -344,7 +389,24 @@ func (c *Client) checkQR(token string) (status, redirect string, errCode int, er
 	if redirect == "" {
 		redirect = anyString(data["url"])
 	}
-	return status, redirect, errCode, nil
+	return status, redirect, 0, nil
+}
+
+func anyInt(v any) int {
+	switch t := v.(type) {
+	case float64:
+		return int(t)
+	case int:
+		return t
+	case int64:
+		return int(t)
+	case string:
+		var n int
+		fmt.Sscanf(t, "%d", &n)
+		return n
+	default:
+		return 0
+	}
 }
 
 func sleep(ctx context.Context, d time.Duration) {
