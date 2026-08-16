@@ -7,4 +7,5 @@ var (
 	ErrNotLoggedIn   = errors.New("xiaohongshu not logged in")
 	ErrQRTimeout     = errors.New("qrcode login timeout")
 	ErrQRExpired     = errors.New("qrcode expired")
+	ErrStartDenied   = errors.New("before/start denied")
 )

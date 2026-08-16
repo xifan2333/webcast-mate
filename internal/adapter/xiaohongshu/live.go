@@ -3,152 +3,226 @@ package xiaohongshu
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 )
 
-// ObsPush is response from /web_api/sns/v1/live/obs/push_url?code=
-type ObsPush struct {
-	RoomID  string
-	PushURL string
-	Server  string
-	Key     string
+// PreRoom POST redobs …/center/room/pre
+func (c *Client) PreRoom() (roomID, pushURL string, raw map[string]any, err error) {
+	m, err := c.do(http.MethodPost, hostRedobs,
+		"/api/sns/redobs/live/app/v1/center/room/pre",
+		map[string]any{"app_id": "1"}, nil,
+		doOpts{redobs: true, originRobs: true})
+	if err != nil {
+		return "", "", nil, err
+	}
+	if !bizOK(m) {
+		return "", "", m, fmt.Errorf("pre: %v", m)
+	}
+	roomID, pushURL = extractRoomPush(m)
+	c.RoomID = roomID
+	c.PushURL = pushURL
+	return roomID, pushURL, m, nil
 }
 
-// FetchObsPushURL exchanges the phone 6-digit OBS code for RTMP push URL.
-// Requires logged-in web_session (QR). Host: www.xiaohongshu.com, appid spectrum.
-func (c *Client) FetchObsPushURL(code string) (*ObsPush, error) {
-	code = strings.TrimSpace(code)
-	if code == "" {
-		return nil, fmt.Errorf("empty obs code")
-	}
-	uri := "/web_api/sns/v1/live/obs/push_url"
-	q := url.Values{}
-	q.Set("code", code)
-	b, err := c.doSpectrumGET(uri, q)
+// BeforeStart POST …/center/room/before/start
+func (c *Client) BeforeStart(roomID string) error {
+	m, err := c.do(http.MethodPost, hostRedobs,
+		"/api/sns/redobs/live/app/v1/center/room/before/start",
+		map[string]any{"room_id": roomID, "app_id": "1"}, nil,
+		doOpts{redobs: true, originRobs: true})
 	if err != nil {
-		return nil, err
+		return err
 	}
-	var out struct {
-		Code    int    `json:"code"`
-		Success bool   `json:"success"`
-		Msg     string `json:"msg"`
-		Data    struct {
-			// field names may vary — collect common ones
-			PushURL string `json:"push_url"`
-			URL     string `json:"url"`
-			RoomID  any    `json:"room_id"`
-			// nested
-			Stream struct {
-				PushURL string `json:"push_url"`
-			} `json:"stream"`
-		} `json:"data"`
+	if !bizOK(m) {
+		return fmt.Errorf("before/start: %v", m)
 	}
-	if err := json.Unmarshal(b, &out); err != nil {
-		return nil, err
+	data, _ := m["data"].(map[string]any)
+	if data != nil {
+		if allow, ok := data["allow_start"].(bool); ok && !allow {
+			return fmt.Errorf("%w: %v", ErrStartDenied, data)
+		}
 	}
-	if out.Code != 0 && !out.Success {
-		return nil, fmt.Errorf("push_url: %s (%d)", out.Msg, out.Code)
+	return nil
+}
+
+// ReportPushInfo POST robs …/live/room/report_push_info
+func (c *Client) ReportPushInfo(roomID, pushURL string, w, h, bitrate, fps int) error {
+	if w == 0 {
+		w = 1280
 	}
-	// also parse loosely
-	var raw map[string]any
-	_ = json.Unmarshal(b, &raw)
-	push := out.Data.PushURL
-	if push == "" {
-		push = out.Data.URL
+	if h == 0 {
+		h = 720
 	}
-	if push == "" {
-		push = out.Data.Stream.PushURL
+	if bitrate == 0 {
+		bitrate = 2500
 	}
-	if push == "" {
-		if data, ok := raw["data"].(map[string]any); ok {
-			for _, k := range []string{"push_url", "url", "rtmp_url", "pushUrl"} {
-				if s, ok := data[k].(string); ok && strings.Contains(s, "rtmp") {
-					push = s
-					break
-				}
+	if fps == 0 {
+		fps = 30
+	}
+	pr, _ := json.Marshal(map[string]any{
+		"codec": 0, "push_type": 3, "bitrate": bitrate, "resolution": 1, "fps": fps,
+		"height": h, "width": w, "push_url": pushURL,
+		"camera_type": "none", "voice_type": "real_micro",
+	})
+	m, err := c.do(http.MethodPost, hostRobs,
+		"/api/sns/live/room/report_push_info",
+		map[string]any{"room_id": roomID, "push_result": string(pr)}, nil,
+		doOpts{originRobs: true})
+	if err != nil {
+		return err
+	}
+	if !bizOK(m) {
+		return fmt.Errorf("report_push_info: %v", m)
+	}
+	return nil
+}
+
+// StartRoom POST …/center/room/start  (verified body)
+func (c *Client) StartRoom(roomID, title, cover string, distribute int) error {
+	if distribute != 0 && distribute != 1 {
+		distribute = 1
+	}
+	body := map[string]any{
+		"room_id":      roomID,
+		"app_id":       "1",
+		"style":        1, // PC
+		"push_type":    0, // FollowDispatch
+		"content_type": 0, // Video
+		"obs":          1, // Obs
+		"distribute":   distribute,
+		"join_limit":   0, // All
+		"name":         title,
+		"cover":        cover,
+		"cover_url":    cover,
+	}
+	m, err := c.do(http.MethodPost, hostRedobs,
+		"/api/sns/redobs/live/app/v1/center/room/start",
+		body, nil, doOpts{redobs: true, originRobs: true})
+	if err != nil {
+		return err
+	}
+	if !bizOK(m) {
+		return fmt.Errorf("start: %v", m)
+	}
+	// nested result.success == false is failure
+	if data, _ := m["data"].(map[string]any); data != nil {
+		if res, _ := data["result"].(map[string]any); res != nil {
+			if s, ok := res["success"].(bool); ok && !s {
+				return fmt.Errorf("start result: %v", res)
 			}
-			// data.url might be object
-			if push == "" {
-				if u, ok := data["url"].(map[string]any); ok {
-					if s, ok := u["push_url"].(string); ok {
-						push = s
+		}
+	}
+	c.RoomID = roomID
+	return nil
+}
+
+// StopRoom POST …/center/room/stop
+func (c *Client) StopRoom(roomID string) error {
+	if roomID == "" {
+		roomID = c.RoomID
+	}
+	if roomID == "" {
+		return nil
+	}
+	m, err := c.do(http.MethodPost, hostRedobs,
+		"/api/sns/redobs/live/app/v1/center/room/stop",
+		map[string]any{"room_id": roomID, "app_id": "1"}, nil,
+		doOpts{redobs: true, originRobs: true})
+	if err != nil {
+		return err
+	}
+	if !bizOK(m) {
+		return fmt.Errorf("stop: %v", m)
+	}
+	return nil
+}
+
+// StreamInfo GET …/get_stream_info
+func (c *Client) StreamInfo(roomID string) (map[string]any, error) {
+	q := url.Values{}
+	q.Set("room_id", roomID)
+	q.Set("app_id", "1")
+	return c.do(http.MethodGet, hostRedobs,
+		"/api/sns/redobs/live/app/v1/center/room/get_stream_info",
+		nil, q, doOpts{redobs: true, originRobs: true})
+}
+
+// LastRoomInfo GET …/last_room_info?host_id=
+func (c *Client) LastRoomInfo() (title, cover string, err error) {
+	if c.UserID == "" {
+		return "", "", fmt.Errorf("no user_id")
+	}
+	q := url.Values{}
+	q.Set("host_id", c.UserID)
+	m, err := c.do(http.MethodGet, hostRedobs,
+		"/api/sns/redobs/live/app/v1/room/last_room_info",
+		nil, q, doOpts{redobs: true, originRobs: true})
+	if err != nil {
+		return "", "", err
+	}
+	if !bizOK(m) {
+		return "", "", fmt.Errorf("last_room_info: %v", m)
+	}
+	data, _ := m["data"].(map[string]any)
+	if data == nil {
+		return "", "", nil
+	}
+	ri, _ := data["room_info"].(map[string]any)
+	if ri == nil {
+		return "", "", nil
+	}
+	title = anyString(ri["room_name"])
+	if title == "" {
+		title = anyString(ri["name"])
+	}
+	if ci, _ := ri["cover_info"].(map[string]any); ci != nil {
+		cover = anyString(ci["cover_url"])
+	}
+	return title, cover, nil
+}
+
+func extractRoomPush(m map[string]any) (roomID, pushURL string) {
+	data, _ := m["data"].(map[string]any)
+	if data == nil {
+		return "", ""
+	}
+	live, _ := data["live_info"].(map[string]any)
+	if live == nil {
+		live = data
+	}
+	if ri, _ := live["room_info"].(map[string]any); ri != nil {
+		roomID = anyString(ri["room_id"])
+	}
+	if roomID == "" {
+		roomID = anyString(data["room_id"])
+	}
+	// walk for rtmp
+	raw, _ := json.Marshal(m)
+	re := regexp.MustCompile(`rtmps?://[^"\\\s]+`)
+	if loc := re.Find(raw); loc != nil {
+		pushURL = string(loc)
+		// unescape \u0026 etc — json already unescaped in string values; from raw marshal may have
+		pushURL = strings.ReplaceAll(pushURL, `\u0026`, "&")
+	}
+	// also try push_dispatch_config
+	if pushURL == "" {
+		if si, _ := live["stream_info"].(map[string]any); si != nil {
+			if pi, _ := si["push_info"].(map[string]any); pi != nil {
+				if cfg, ok := pi["push_dispatch_config"].(string); ok {
+					if loc := re.FindString(cfg); loc != "" {
+						pushURL = loc
 					}
 				}
 			}
 		}
 	}
-	if push == "" {
-		return nil, fmt.Errorf("push_url: no rtmp in response: %s", truncate(string(b), 300))
-	}
-	roomID := fmt.Sprint(out.Data.RoomID)
-	if roomID == "" || roomID == "<nil>" {
-		if data, ok := raw["data"].(map[string]any); ok {
-			if r, ok := data["room_id"]; ok {
-				roomID = fmt.Sprint(r)
-			}
-		}
-	}
-	server, key := SplitPushURL(push)
-	return &ObsPush{RoomID: roomID, PushURL: push, Server: server, Key: key}, nil
+	return roomID, pushURL
 }
 
-// LivingPushURL tries GET living_push_url when already live.
-func (c *Client) LivingPushURL() (*ObsPush, error) {
-	uri := "/web_api/sns/v1/live/obs/living_push_url"
-	b, err := c.doSpectrumGET(uri, nil)
-	if err != nil {
-		return nil, err
-	}
-	var raw map[string]any
-	if err := json.Unmarshal(b, &raw); err != nil {
-		return nil, err
-	}
-	code, _ := raw["code"].(float64)
-	if code != 0 {
-		msg, _ := raw["msg"].(string)
-		return nil, fmt.Errorf("living_push_url: %s (%v)", msg, code)
-	}
-	// reuse parser via wrapping
-	return parsePushPayload(b)
-}
-
-func parsePushPayload(b []byte) (*ObsPush, error) {
-	var c Client
-	// fake by reusing FetchObsPushURL parser — duplicate minimal
-	var raw map[string]any
-	_ = json.Unmarshal(b, &raw)
-	data, _ := raw["data"].(map[string]any)
-	if data == nil {
-		return nil, fmt.Errorf("no data: %s", truncate(string(b), 200))
-	}
-	push := ""
-	for _, k := range []string{"push_url", "url", "rtmp_url"} {
-		if s, ok := data[k].(string); ok && strings.Contains(s, "rtmp") {
-			push = s
-			break
-		}
-	}
-	if push == "" {
-		if u, ok := data["url"].(map[string]any); ok {
-			if s, ok := u["push_url"].(string); ok {
-				push = s
-			}
-		}
-	}
-	if push == "" {
-		return nil, fmt.Errorf("no push_url: %s", truncate(string(b), 200))
-	}
-	roomID := ""
-	if r, ok := data["room_id"]; ok {
-		roomID = fmt.Sprint(r)
-	}
-	server, key := SplitPushURL(push)
-	_ = c
-	return &ObsPush{RoomID: roomID, PushURL: push, Server: server, Key: key}, nil
-}
-
-// SplitPushURL splits rtmp://host/app/key?query into server + key.
+// SplitPushURL splits rtmp://host/app/key?q into server + key.
 func SplitPushURL(push string) (server, key string) {
 	push = strings.TrimSpace(push)
 	if push == "" {

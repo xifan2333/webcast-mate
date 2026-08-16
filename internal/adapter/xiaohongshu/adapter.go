@@ -12,7 +12,9 @@ import (
 	"github.com/xifan2333/webcast-mate/internal/platform"
 )
 
-// Adapter: web QR login + phone OBS 6-digit code → push_url.
+// Adapter implements live-helper 4.4.0:
+// CAS QR → AT → pre → before/start → start (distribute) → stop / status.
+// Capture/ffmpeg is external; start returns server/key for gsr/OBS.
 type Adapter struct{}
 
 func New() *Adapter { return &Adapter{} }
@@ -26,32 +28,58 @@ func (a *Adapter) Start(ctx context.Context, opts adapter.StartOpts) (*adapter.S
 		return nil, err
 	}
 
-	ocfg, err := ResolveOpenConfig(ctx, opts)
+	ocfg, err := ResolveOpenConfig(ctx, cli, opts)
 	if err != nil {
 		return nil, err
 	}
 
-	obs, err := cli.FetchObsPushURL(ocfg.Code)
+	// stop previous local room if any
+	if t, ok := live.Get("xiaohongshu"); ok && t.RoomID != "" {
+		_ = cli.StopRoom(t.RoomID)
+		_ = live.Remove("xiaohongshu")
+	}
+
+	roomID, pushURL, _, err := cli.PreRoom()
 	if err != nil {
 		return nil, err
 	}
-	server, key := obs.Server, obs.Key
-	if server == "" {
-		server, key = SplitPushURL(obs.PushURL)
+	if roomID == "" || pushURL == "" {
+		return nil, fmt.Errorf("pre: empty room/push")
 	}
-	if server == "" {
-		server = obs.PushURL
-	}
+	fmt.Fprintf(os.Stderr, "xiaohongshu: pre room=%s\n", roomID)
 
+	if err := cli.BeforeStart(roomID); err != nil {
+		return nil, err
+	}
+	fmt.Fprintln(os.Stderr, "xiaohongshu: before/start ok")
+
+	// report with placeholder dims; real encoder may differ
 	file, _ := appcfg.Load()
 	vbr, abr := 4000, 128
 	if file != nil {
 		vbr, abr = file.Bitrate("xiaohongshu")
 	}
-	roomID := obs.RoomID
-	if roomID == "" {
-		roomID = ocfg.Code // fallback identifier
+	_ = cli.ReportPushInfo(roomID, pushURL, 1280, 720, vbr, 30)
+
+	if err := cli.StartRoom(roomID, ocfg.Title, ocfg.Cover, ocfg.Distribute); err != nil {
+		return nil, err
 	}
+	fmt.Fprintf(os.Stderr, "xiaohongshu: start ok distribute=%d — begin RTMP push now\n", ocfg.Distribute)
+
+	server, key := SplitPushURL(pushURL)
+	if server == "" {
+		server, key = pushURL, ""
+	}
+
+	// persist room on session
+	if sec != nil {
+		sec.RoomID = roomID
+		sec.AccessToken = cli.AccessToken
+		_ = saveSession(cli.sessionBlob())
+	} else {
+		_ = saveSession(cli.sessionBlob())
+	}
+
 	if err := live.Upsert("xiaohongshu", live.Target{
 		RoomID:       roomID,
 		Server:       server,
@@ -63,14 +91,11 @@ func (a *Adapter) Start(ctx context.Context, opts adapter.StartOpts) (*adapter.S
 		return nil, err
 	}
 
-	cookie := ""
-	if sec != nil {
-		cookie = sec.Cookie
-	} else {
-		cookie = cli.cookieHeader()
+	// Cookie field: expose AT blob for downstream (danmaku may need separate tourist path)
+	cookie := cli.AccessToken
+	if b, err := jsonMarshalSession(cli.sessionBlob()); err == nil {
+		cookie = string(b)
 	}
-
-	fmt.Fprintln(os.Stderr, "xiaohongshu: got push_url; start streaming, then tap 进入直播 on phone if needed")
 
 	return &adapter.StartResult{
 		Platform: string(platform.XiaoHongShu),
@@ -83,16 +108,36 @@ func (a *Adapter) Start(ctx context.Context, opts adapter.StartOpts) (*adapter.S
 
 func (a *Adapter) Stop(ctx context.Context) (*adapter.StopResult, error) {
 	_ = ctx
-	// Web OBS path: stop is primarily on the phone; clear local live.json.
 	res := &adapter.StopResult{
 		Platform: string(platform.XiaoHongShu),
 		Status:   "stopped",
 	}
+	roomID := ""
 	if t, ok := live.Get("xiaohongshu"); ok {
-		res.RoomID = t.RoomID
+		roomID = t.RoomID
+		res.RoomID = roomID
+	}
+	cli := NewClient()
+	if s, err := loadSession(); err == nil {
+		cli.applySession(s)
+		if roomID == "" {
+			roomID = s.RoomID
+			res.RoomID = roomID
+		}
+	}
+	if roomID != "" && cli.AccessToken != "" {
+		if err := cli.StopRoom(roomID); err != nil {
+			fmt.Fprintf(os.Stderr, "xiaohongshu: stop: %v (clearing local)\n", err)
+		} else {
+			fmt.Fprintln(os.Stderr, "xiaohongshu: stop ok")
+		}
 	}
 	_ = live.Remove("xiaohongshu")
-	fmt.Fprintln(os.Stderr, "xiaohongshu: cleared local live.json (end live on phone if still on air)")
+	// clear room from secrets
+	if s, err := loadSession(); err == nil {
+		s.RoomID = ""
+		_ = saveSession(s)
+	}
 	return res, nil
 }
 
@@ -106,26 +151,40 @@ func (a *Adapter) Status(ctx context.Context) (*adapter.StatusResult, error) {
 		out.RoomID = t.RoomID
 		out.Server = t.Server
 		out.Key = t.Key
-		out.Status = "live" // local session active; remote stop is phone-side
+		out.Status = "live"
 	}
-	if s, err := loadSecret(); err == nil {
-		out.Cookie = s.Cookie
-	}
-	// best-effort remote: living_push_url
 	cli := NewClient()
-	if s, err := loadSecret(); err == nil {
-		cli.applySecret(s)
+	s, err := loadSession()
+	if err != nil {
+		return out, nil
 	}
-	if cli.WebSession != "" {
-		if obs, err := cli.LivingPushURL(); err == nil && obs != nil && obs.PushURL != "" {
-			out.Status = "live"
-			if obs.RoomID != "" {
-				out.RoomID = obs.RoomID
-			}
-			if out.Server == "" {
-				out.Server, out.Key = SplitPushURL(obs.PushURL)
+	cli.applySession(s)
+	if b, err := jsonMarshalSession(s); err == nil {
+		out.Cookie = string(b)
+	}
+	ok, _ := cli.CheckLogin()
+	if !ok {
+		out.Status = "idle"
+		return out, nil
+	}
+	// stream info if we have room
+	roomID := out.RoomID
+	if roomID == "" {
+		roomID = s.RoomID
+	}
+	if roomID != "" {
+		if m, err := cli.StreamInfo(roomID); err == nil && bizOK(m) {
+			if data, _ := m["data"].(map[string]any); data != nil {
+				if anyInt(data["stream_status"]) == 1 {
+					out.Status = "live"
+					out.RoomID = roomID
+				}
 			}
 		}
 	}
 	return out, nil
+}
+
+func jsonMarshalSession(s *SessionBlob) ([]byte, error) {
+	return jsonMarshal(s)
 }

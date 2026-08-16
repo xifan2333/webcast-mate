@@ -72,7 +72,7 @@ go test ./...
 | Go module + CLI skeleton + conf R/W | done |
 | `bilibili` adapter | QR login + startLive/stopLive + face auth |
 | `douyin` | streamingtool QR login; create_info + a_bogus + create; ping LIVING/FINISH; status |
-| `xiaohongshu` | OBS 6-digit → `push_url` only (**no robs**); login cookie source TBD |
+| `xiaohongshu` | live-helper 4.4.0: CAS QR → AT → redobs pre/start/stop; distribute 0/1 |
 
 `a_bogus` for douyin: needs chromium on PATH (bdms 1.0.1.20), or `WEBCAST_MATE_DY_ABOGUS` / `WEBCAST_MATE_DY_ABOGUS_CMD`.
 

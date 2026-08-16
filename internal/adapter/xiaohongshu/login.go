@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -15,30 +16,30 @@ import (
 	"github.com/xifan2333/webcast-mate/internal/termimg"
 )
 
-// SecretData stored as JSON in secrets/xiaohongshu.json.
-type SecretData struct {
-	Cookie   string    `json:"cookie"`
-	UserID   string    `json:"user_id,omitempty"`
-	UserName string    `json:"user_name,omitempty"`
-	LoginAt  time.Time `json:"login_at,omitempty"`
-}
-
-func loadSecret() (*SecretData, error) {
+func loadSession() (*SessionBlob, error) {
 	f, err := secrets.Load("xiaohongshu")
 	if err != nil {
 		return nil, err
 	}
+	// Prefer JSON blob in Cookie field
 	if len(f.Cookie) > 0 && f.Cookie[0] == '{' {
-		var s SecretData
+		var s SessionBlob
 		if err := json.Unmarshal([]byte(f.Cookie), &s); err != nil {
 			return nil, err
 		}
+		if s.UserID == "" {
+			s.UserID = f.UserID
+		}
+		if s.UserName == "" {
+			s.UserName = f.UserName
+		}
 		return &s, nil
 	}
-	return &SecretData{Cookie: f.Cookie, UserID: f.UserID, UserName: f.UserName, LoginAt: f.LoginAt}, nil
+	// legacy plain cookie — not usable for helper AT path
+	return nil, os.ErrNotExist
 }
 
-func saveSecret(s *SecretData) error {
+func saveSession(s *SessionBlob) error {
 	b, err := json.Marshal(s)
 	if err != nil {
 		return err
@@ -51,101 +52,67 @@ func saveSecret(s *SecretData) error {
 	})
 }
 
-func (c *Client) applySecret(s *SecretData) {
-	if s == nil || s.Cookie == "" {
-		return
-	}
-	if c.extra == nil {
-		c.extra = map[string]string{}
-	}
-	for _, part := range strings.Split(s.Cookie, ";") {
-		part = strings.TrimSpace(part)
-		k, v, ok := strings.Cut(part, "=")
-		if !ok {
-			continue
-		}
-		k = strings.TrimSpace(k)
-		v = strings.TrimSpace(v)
-		switch k {
-		case "a1":
-			c.A1 = v
-		case "webId":
-			c.WebID = v
-		case "web_session":
-			c.WebSession = v
-		case "xsecappid":
-			// ignore; set per request
-		default:
-			if v != "" {
-				c.extra[k] = v
-			}
-		}
-	}
-	if c.WebID == "" && c.A1 != "" {
-		c.WebID = GenerateWebID(c.A1)
-	}
-	c.UserID = s.UserID
-}
-
-// EnsureLogin loads web session or runs QR login.
-func (c *Client) EnsureLogin(ctx context.Context) (*SecretData, error) {
-	if s, err := loadSecret(); err == nil && s.Cookie != "" {
-		c.applySecret(s)
-		if c.WebSession != "" && c.A1 != "" {
+// EnsureLogin loads AT session or runs CAS QR login.
+func (c *Client) EnsureLogin(ctx context.Context) (*SessionBlob, error) {
+	if s, err := loadSession(); err == nil && s.AccessToken != "" {
+		c.applySession(s)
+		if ok, _ := c.CheckLogin(); ok {
 			return s, nil
 		}
+		fmt.Fprintln(os.Stderr, "xiaohongshu: saved token invalid, re-login")
 	}
 	return c.loginQR(ctx)
 }
 
-// loginQR — protocol from public reverse notes / RedNote-Skill:
-//
-//	POST /api/sns/web/v1/login/qrcode/create  {"qr_type":1}
-//	  → data.url, data.qr_id, data.code
-//	GET  /api/sns/web/v1/login/qrcode/status?code=&qr_id=
-//	  code_status: 0 wait | 1 scanned | 2 ok | 3 expired
-//	  on 2: data.login_info.session → web_session cookie
-func (c *Client) loginQR(ctx context.Context) (*SecretData, error) {
-	if err := c.EnsureWebGuest(); err != nil {
-		return nil, err
+// CheckLogin GET robs/api/sns/check_login
+func (c *Client) CheckLogin() (bool, map[string]any) {
+	m, err := c.do(http.MethodGet, hostRobs, "/api/sns/check_login", nil, nil, doOpts{})
+	if err != nil {
+		return false, nil
 	}
+	return bizOK(m), m
+}
 
-	// 1) create
-	createBody := json.RawMessage(`{"qr_type":1}`)
-	b, err := c.doEdith("POST", "/api/sns/web/v1/login/qrcode/create", createBody)
+// CheckLive GET robs/api/sns/live/check_live
+func (c *Client) CheckLive() (map[string]any, error) {
+	return c.do(http.MethodGet, hostRobs, "/api/sns/live/check_live", nil, nil, doOpts{})
+}
+
+func (c *Client) loginQR(ctx context.Context) (*SessionBlob, error) {
+	c.ensureIdentity()
+	// zones (optional)
+	_, _ = c.do(http.MethodGet, hostCustomer, "/api/cas/customer/pc/zones", nil,
+		url.Values{"service": {serviceRobs}}, doOpts{sign: true, originRobs: true})
+
+	// create QR
+	body := map[string]any{"service": serviceRobs, "subsystem": "robs"}
+	created, err := c.do(http.MethodPost, hostCustomer, "/api/cas/customer/pc/qr-code", body, nil,
+		doOpts{sign: true, originRobs: true})
 	if err != nil {
 		return nil, fmt.Errorf("qr create: %w", err)
 	}
-	var created struct {
-		Code    int    `json:"code"`
-		Success bool   `json:"success"`
-		Msg     string `json:"msg"`
-		Data    struct {
-			URL  string `json:"url"`
-			Code string `json:"code"`
-			QRID string `json:"qr_id"`
-		} `json:"data"`
+	if !bizOK(created) {
+		return nil, fmt.Errorf("qr create: %v", created)
 	}
-	if err := json.Unmarshal(b, &created); err != nil {
-		return nil, fmt.Errorf("qr create parse: %w (%s)", err, truncate(string(b), 180))
+	data, _ := created["data"].(map[string]any)
+	if data == nil {
+		return nil, fmt.Errorf("qr create no data: %v", created)
 	}
-	if !created.Success || created.Code != 0 || created.Data.QRID == "" || created.Data.Code == "" {
-		return nil, fmt.Errorf("qr create: %s", truncate(string(b), 200))
-	}
-	qrURL := created.Data.URL
-	if qrURL == "" {
-		qrURL = "https://www.xiaohongshu.com/login?qr_code=" + created.Data.Code
+	qid := anyString(data["id"])
+	qrURL := anyString(data["url"])
+	if qid == "" {
+		return nil, fmt.Errorf("qr create missing id: %v", created)
 	}
 
-	fmt.Fprintln(os.Stderr, "xiaohongshu: scan with 小红书 App")
-	fmt.Fprintln(os.Stderr, qrURL)
-	printQR(qrURL)
-	fmt.Fprintf(os.Stderr, "xiaohongshu: qr_id=%s code=%s\n", created.Data.QRID, created.Data.Code)
+	fmt.Fprintln(os.Stderr, "xiaohongshu: scan QR with 小红书 App (live-helper CAS)")
+	if qrURL != "" {
+		fmt.Fprintln(os.Stderr, qrURL)
+		printQR(qrURL)
+	}
 
-	// 2) poll status every 1s (same as official web)
 	deadline := time.Now().Add(3 * time.Minute)
-	last := -1
-	n := 0
+	last := -999
+	var ticket string
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -153,90 +120,94 @@ func (c *Client) loginQR(ctx context.Context) (*SecretData, error) {
 		if time.Now().After(deadline) {
 			return nil, ErrQRTimeout
 		}
-
 		q := url.Values{}
-		// alphabetical: code, qr_id — matches SignXS sorted GET + url.Values.Encode
-		q.Set("code", created.Data.Code)
-		q.Set("qr_id", created.Data.QRID)
-
-		prevSession := c.WebSession
-		body, hdr, err := c.do(http.MethodGet, edithHost, "/api/sns/web/v1/login/qrcode/status", nil, q)
-		n++
-		// Even on transport/HTTP errors, body may still carry business JSON (471).
-		st, apiCode, loginSession, loginUID, ok := parseStatus(body)
-
-		// After phone confirm, XHS sometimes returns HTTP 471 + empty data{},
-		// with the real session only in Set-Cookie (already applied in do).
-		sessionBumped := c.WebSession != "" && c.WebSession != prevSession
-		if sessionBumped && (st == 2 || st == 0 && last == 1 || (ok && apiCode == 0 && last == 1)) {
-			fmt.Fprintln(os.Stderr, "xiaohongshu: confirmed (session via Set-Cookie)")
-			return c.finishQRLogin(body, loginSession, loginUID)
-		}
-
-		if err != nil && !ok {
-			if n <= 5 || n%5 == 0 {
-				fmt.Fprintf(os.Stderr, "xiaohongshu: status err: %v\n", err)
-				if hdr != nil {
-					if v := hdr.Get("verifytype"); v != "" || hdr.Get("verifyuuid") != "" {
-						fmt.Fprintf(os.Stderr, "xiaohongshu: captcha headers verifytype=%s verifyuuid=%s\n",
-							hdr.Get("verifytype"), hdr.Get("verifyuuid"))
-					}
-				}
-			}
+		q.Set("qr_code_id", qid)
+		q.Set("service", serviceRobs)
+		st, err := c.do(http.MethodGet, hostCustomer, "/api/cas/customer/pc/qr-code", nil, q,
+			doOpts{sign: true, originRobs: true})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "xiaohongshu: poll err: %v\n", err)
 			sleep(ctx, time.Second)
 			continue
 		}
-		if !ok || apiCode != 0 {
-			if n <= 5 || n%5 == 0 {
-				fmt.Fprintf(os.Stderr, "xiaohongshu: status body: %s\n", truncate(string(body), 220))
-			}
-			// empty success after scan → keep polling briefly; may still set cookie
+		d, _ := st["data"].(map[string]any)
+		if d == nil {
 			sleep(ctx, time.Second)
 			continue
 		}
-
-		// empty data{} after scanned: treat as transitional, not failure
-		if ok && apiCode == 0 && st == 0 && last == 1 && len(body) > 0 {
-			// body like {"code":0,"success":true,"data":{}} after confirm
-			if sessionBumped {
-				fmt.Fprintln(os.Stderr, "xiaohongshu: confirmed (empty data, session updated)")
-				return c.finishQRLogin(body, loginSession, loginUID)
-			}
-			if n <= 8 {
-				fmt.Fprintf(os.Stderr, "xiaohongshu: post-confirm empty data, polling… (%s)\n", truncate(string(body), 120))
-			}
-		}
-
-		if st != last {
-			last = st
-			switch st {
-			case 0:
-				fmt.Fprintln(os.Stderr, "xiaohongshu: waiting for scan…")
-			case 1:
-				fmt.Fprintln(os.Stderr, "xiaohongshu: scanned — confirm on phone")
+		status := anyInt(d["status"])
+		if status != last {
+			last = status
+			switch status {
 			case 2:
-				fmt.Fprintln(os.Stderr, "xiaohongshu: confirmed")
+				fmt.Fprintln(os.Stderr, "xiaohongshu: waiting / scanned…")
 			case 3:
-				fmt.Fprintln(os.Stderr, "xiaohongshu: qr expired")
+				fmt.Fprintln(os.Stderr, "xiaohongshu: confirming…")
+			case 1:
+				fmt.Fprintln(os.Stderr, "xiaohongshu: confirmed")
 			default:
-				fmt.Fprintf(os.Stderr, "xiaohongshu: code_status=%d raw=%s\n", st, truncate(string(body), 200))
+				fmt.Fprintf(os.Stderr, "xiaohongshu: status=%d\n", status)
 			}
-		} else if st == 0 && n%15 == 0 {
-			fmt.Fprintf(os.Stderr, "xiaohongshu: still waiting (poll #%d)…\n", n)
 		}
-
-		switch st {
-		case 0, 1:
-			sleep(ctx, time.Second)
-			continue
-		case 3:
-			return nil, ErrQRExpired
-		case 2:
-			return c.finishQRLogin(body, loginSession, loginUID)
-		default:
-			sleep(ctx, time.Second)
+		if t := anyString(d["ticket"]); t != "" {
+			ticket = t
+			break
 		}
+		// raw scan for ST-
+		raw, _ := json.Marshal(st)
+		if i := strings.Index(string(raw), "ST-"); i >= 0 {
+			end := i + 2
+			for end < len(raw) {
+				ch := raw[end]
+				if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '-' {
+					end++
+					continue
+				}
+				break
+			}
+			ticket = string(raw[i:end])
+			if len(ticket) > 10 {
+				break
+			}
+			ticket = ""
+		}
+		sleep(ctx, time.Second)
 	}
+	if ticket == "" {
+		return nil, ErrQRTimeout
+	}
+	fmt.Fprintf(os.Stderr, "xiaohongshu: ticket ok, exchanging AT…\n")
+
+	// exchange
+	loginBody := map[string]any{"ticket": ticket, "service": serviceRobs}
+	lr, err := c.do(http.MethodPost, hostRobs, "/api/sns/login", loginBody, nil, doOpts{sign: true, originRobs: true})
+	if err != nil {
+		return nil, fmt.Errorf("login: %w", err)
+	}
+	if !bizOK(lr) {
+		return nil, fmt.Errorf("login: %v", lr)
+	}
+	ld, _ := lr["data"].(map[string]any)
+	if ld == nil {
+		return nil, fmt.Errorf("login no data: %v", lr)
+	}
+	at := anyString(ld["access_token"])
+	if at == "" {
+		return nil, fmt.Errorf("login no access_token: %v", lr)
+	}
+	c.AccessToken = at
+	c.UserID = anyString(ld["user_id"])
+	c.UserName = anyString(ld["nickname"])
+	s := c.sessionBlob()
+	s.LoginAt = time.Now().UTC()
+	if err := saveSession(s); err != nil {
+		return nil, err
+	}
+	if c.UserName != "" {
+		fmt.Fprintf(os.Stderr, "xiaohongshu: logged in as %s\n", c.UserName)
+	}
+	fmt.Fprintln(os.Stderr, "xiaohongshu: CAS login ok")
+	return s, nil
 }
 
 func sleep(ctx context.Context, d time.Duration) {
@@ -246,138 +217,37 @@ func sleep(ctx context.Context, d time.Duration) {
 	}
 }
 
-// parseStatus reads code_status + login_info from flexible JSON.
-func parseStatus(body []byte) (codeStatus, apiCode int, session, userID string, ok bool) {
-	var top map[string]any
-	if err := json.Unmarshal(body, &top); err != nil {
-		return 0, -1, "", "", false
-	}
-	apiCode = anyInt(top["code"])
-	data, _ := top["data"].(map[string]any)
-	if data == nil {
-		return 0, apiCode, "", "", false
-	}
-	codeStatus = anyInt(data["code_status"])
-	if codeStatus == 0 {
-		// try alternate keys
-		if v, has := data["codeStatus"]; has {
-			codeStatus = anyInt(v)
-		}
-	}
-	if li, ok2 := data["login_info"].(map[string]any); ok2 {
-		if s, _ := li["session"].(string); s != "" {
-			session = s
-		}
-		if u, _ := li["user_id"].(string); u != "" {
-			userID = u
-		}
-	}
-	return codeStatus, apiCode, session, userID, true
-}
-
-func anyInt(v any) int {
-	switch t := v.(type) {
-	case float64:
-		return int(t)
-	case int:
-		return t
-	case int64:
-		return int(t)
-	case json.Number:
-		i, _ := t.Int64()
-		return int(i)
-	case string:
-		var n int
-		fmt.Sscanf(t, "%d", &n)
-		return n
-	default:
-		return 0
-	}
-}
-
-func (c *Client) finishQRLogin(body []byte, loginSession, loginUID string) (*SecretData, error) {
-	if loginSession != "" {
-		c.WebSession = loginSession
-	}
-	if loginUID != "" {
-		c.UserID = loginUID
-	}
-	applyQRLoginPayload(c, body)
-	if c.WebSession == "" {
-		return nil, fmt.Errorf("qr ok but no web_session: %s", truncate(string(body), 240))
-	}
-	// Validate session with /user/me when possible (non-fatal).
-	if me, err := c.doEdithGET("/api/sns/web/v2/user/me", nil); err == nil {
-		var top map[string]any
-		if json.Unmarshal(me, &top) == nil {
-			if data, _ := top["data"].(map[string]any); data != nil {
-				if uid, _ := data["user_id"].(string); uid != "" {
-					c.UserID = uid
-				}
-				if name, _ := data["nickname"].(string); name != "" {
-					fmt.Fprintf(os.Stderr, "xiaohongshu: logged in as %s\n", name)
-				}
-			}
-		}
-	}
-	s := &SecretData{
-		Cookie:  c.cookieHeader(),
-		UserID:  c.UserID,
-		LoginAt: time.Now().UTC(),
-	}
-	if err := saveSecret(s); err != nil {
-		return nil, err
-	}
-	fmt.Fprintln(os.Stderr, "xiaohongshu: web QR login ok")
-	return s, nil
-}
-
-func applyQRLoginPayload(c *Client, body []byte) {
-	var raw map[string]any
-	if json.Unmarshal(body, &raw) != nil {
-		return
-	}
-	data, _ := raw["data"].(map[string]any)
-	if data == nil {
-		return
-	}
-	if s, ok := data["session"].(string); ok && s != "" {
-		c.WebSession = s
-	}
-	if li, ok := data["login_info"].(map[string]any); ok {
-		if s, ok := li["session"].(string); ok && s != "" {
-			c.WebSession = s
-		}
-		if u, ok := li["user_id"].(string); ok && u != "" {
-			c.UserID = u
-		}
-		// some builds put web_session here
-		if s, ok := li["web_session"].(string); ok && s != "" {
-			c.WebSession = s
-		}
-	}
-}
-
 func printQR(content string) {
 	if content == "" {
 		return
 	}
 	q, err := qrcode.New(content, qrcode.Medium)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "xiaohongshu: qr: %v\n", err)
 		return
 	}
-	if termimg.SupportsKitty() {
-		if png, err := q.PNG(280); err == nil && termimg.WriteKittyPNG(os.Stderr, png) == nil {
+	// PNG file + open
+	if png, err := q.PNG(320); err == nil {
+		dir := filepath.Join(os.TempDir(), "webcast-mate")
+		_ = os.MkdirAll(dir, 0o755)
+		path := filepath.Join(dir, "xhs-cas-qr.png")
+		if err := os.WriteFile(path, png, 0o600); err == nil {
+			fmt.Fprintf(os.Stderr, "xiaohongshu: QR image %s\n", path)
+			// best-effort open
+			for _, bin := range []string{"xdg-open", "imv", "imv-wayland", "feh"} {
+				if p, err := execLookPath(bin); err == nil {
+					_ = startDetached(p, path)
+					break
+				}
+			}
+		}
+		if termimg.SupportsKitty() && termimg.WriteKittyPNG(os.Stderr, png) == nil {
 			return
 		}
 	}
 	fmt.Fprint(os.Stderr, q.ToSmallString(false))
 }
 
-func isInteractive() bool {
-	fi, err := os.Stdin.Stat()
-	if err != nil {
-		return false
-	}
-	return (fi.Mode() & os.ModeCharDevice) != 0
+func execLookPath(file string) (string, error) {
+	return lookPath(file)
 }

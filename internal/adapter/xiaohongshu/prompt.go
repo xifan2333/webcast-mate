@@ -2,63 +2,105 @@ package xiaohongshu
 
 import (
 	"context"
-	"fmt"
 	"os"
+	"strconv"
 
 	"github.com/charmbracelet/huh"
 	"github.com/xifan2333/webcast-mate/internal/adapter"
 	"github.com/xifan2333/webcast-mate/internal/appcfg"
 )
 
-// OpenConfig holds the phone OBS 6-digit code (and optional notes).
+// OpenConfig start-time prefs for live-helper path.
 type OpenConfig struct {
-	// Code is the 6-digit code from 手机预直播页 → 电脑 tab.
-	Code string
+	Title      string
+	Cover      string
+	Distribute int // 1=public distribute (default), 0=trial no feed
 }
 
-func ResolveOpenConfig(ctx context.Context, opts adapter.StartOpts) (*OpenConfig, error) {
+func ResolveOpenConfig(ctx context.Context, cli *Client, opts adapter.StartOpts) (*OpenConfig, error) {
 	_ = ctx
 	_ = appcfg.EnsureExists()
 	file, err := appcfg.Load()
 	if err != nil {
 		return nil, err
 	}
-	// store last code? not really durable — just prompt
-	_ = file
-
-	cfg := &OpenConfig{}
-	if opts.Yes {
-		// allow WEBCAST_MATE_XHS_CODE env for scripts
-		if c := os.Getenv("WEBCAST_MATE_XHS_CODE"); c != "" {
-			cfg.Code = c
-			return cfg, nil
+	cfg := &OpenConfig{Distribute: 1}
+	if p := file.GetPlatform("xiaohongshu"); p.Title != "" {
+		cfg.Title = p.Title
+	}
+	// last room defaults
+	if t, c, err := cli.LastRoomInfo(); err == nil {
+		if cfg.Title == "" && t != "" {
+			cfg.Title = t
 		}
-		return nil, fmt.Errorf("%w: need OBS code (interactive or WEBCAST_MATE_XHS_CODE)", ErrNotConfigured)
+		cfg.Cover = c
+	}
+	if t := os.Getenv("WEBCAST_MATE_XHS_TITLE"); t != "" {
+		cfg.Title = t
+	}
+	if d := os.Getenv("WEBCAST_MATE_XHS_DISTRIBUTE"); d != "" {
+		if n, err := strconv.Atoi(d); err == nil && (n == 0 || n == 1) {
+			cfg.Distribute = n
+		}
+	}
+	if opts.Yes {
+		if cfg.Title == "" {
+			cfg.Title = "直播"
+		}
+		return cfg, nil
 	}
 	if !isInteractive() {
-		if c := os.Getenv("WEBCAST_MATE_XHS_CODE"); c != "" {
-			cfg.Code = c
-			return cfg, nil
+		if cfg.Title == "" {
+			cfg.Title = "直播"
 		}
-		return nil, fmt.Errorf("%w: non-interactive; set WEBCAST_MATE_XHS_CODE", ErrNotConfigured)
+		return cfg, nil
 	}
 
-	code := ""
+	title := cfg.Title
+	distLabel := "正常开播（公域分发）"
+	if cfg.Distribute == 0 {
+		distLabel = "试播（不分发）"
+	}
+	dist := distLabel
 	form := huh.NewForm(huh.NewGroup(
 		huh.NewInput().
-			Title("连接码").
-			Description("手机小红书预直播页 →「电脑」tab 显示的 6 位码").
-			Value(&code).
-			Validate(func(s string) error {
-				if s == "" {
-					return fmt.Errorf("必填")
-				}
-				return nil
-			}),
+			Title("标题").
+			Description("直播间标题").
+			Value(&title),
+		huh.NewSelect[string]().
+			Title("分发").
+			Description("distribute=1 别人能刷到；0=试播不分发").
+			Options(
+				huh.NewOption("正常开播（公域分发）", "正常开播（公域分发）"),
+				huh.NewOption("试播（不分发）", "试播（不分发）"),
+			).
+			Value(&dist),
 	)).WithTheme(huh.ThemeCharm())
 	if err := form.Run(); err != nil {
 		return nil, err
 	}
-	cfg.Code = code
+	if title == "" {
+		title = "直播"
+	}
+	cfg.Title = title
+	if dist == "试播（不分发）" {
+		cfg.Distribute = 0
+	} else {
+		cfg.Distribute = 1
+	}
+	p := file.GetPlatform("xiaohongshu")
+	p.Title = title
+	file.Platforms["xiaohongshu"] = p
+	_ = appcfg.Save(file)
 	return cfg, nil
 }
+
+func isInteractive() bool {
+	fi, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	return (fi.Mode() & os.ModeCharDevice) != 0
+}
+
+// silence unused if cover empty

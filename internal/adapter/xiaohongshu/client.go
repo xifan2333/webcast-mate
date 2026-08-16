@@ -2,84 +2,84 @@ package xiaohongshu
 
 import (
 	"bytes"
+	"crypto/md5"
 	"crypto/rand"
-	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 )
 
 const (
-	edithHost = "https://edith.xiaohongshu.com"
-	wwwHost   = "https://www.xiaohongshu.com"
-	userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
+	hostCustomer = "https://customer.xiaohongshu.com"
+	hostRobs     = "https://robs.xiaohongshu.com"
+	hostRedobs   = "https://redobs.xiaohongshu.com"
+	serviceRobs  = "https://robs.xiaohongshu.com"
+	xsecAppLive  = "live-helper"
+	userAgent    = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) live-helper/4.4.0 Chrome/118.0.5993.159 Electron/27.3.2 Safari/537.36 env/production platform/win32 appname/xhs-live win_version/windows"
+	xyCommon     = "platform=pc&build=4040000&version=4.4.0&isWin7=false&systemVersion=10.0.19045&cpuModel=Intel(R)+Core(TM)+i5-2520M+CPU+@+2.50GHz&gpu=ANGLE+(Intel,+Intel(R)+HD+Graphics+3000+Direct3D9Ex+vs_3_0+ps_3_0,+igdumd64.dll)"
 )
 
-// Client is the web/spectrum HTTP client (QR login + OBS push_url).
-// Cookie model: a1/webId/web_session for sign + sticky edge cookies (acw_tc)
-// echoed on every request. Without acw_tc echo, status after confirm resets.
+// Client is live-helper 4.4.0 HTTP client (CAS + robs + redobs).
 type Client struct {
-	http       *http.Client
-	A1         string
-	WebID      string
-	WebSession string
-	UserID     string
-	// XsecAppID: xhs-pc-web for edith QR; spectrum for zhibo/obs.
-	XsecAppID string
-	// Extra cookies from Set-Cookie (acw_tc, websectiga, sec_poison_id, …).
-	extra map[string]string
+	http        *http.Client
+	A1          string
+	WebID       string
+	AccessToken string
+	DeviceID    string
+	Subsystem   string
+	UserID      string
+	UserName    string
+	extraCookie map[string]string
+	// lastRoom from pre
+	RoomID  string
+	PushURL string
 }
 
 func NewClient() *Client {
 	return &Client{
-		http:      &http.Client{Timeout: 25 * time.Second},
-		XsecAppID: "xhs-pc-web",
-		extra:     map[string]string{},
+		http:        &http.Client{Timeout: 30 * time.Second},
+		Subsystem:   "robs",
+		DeviceID:    randomMAC(),
+		extraCookie: map[string]string{},
 	}
 }
 
-func (c *Client) cookieMap() map[string]string {
-	m := map[string]string{"xsecappid": c.XsecAppID}
-	if c.A1 != "" {
-		m["a1"] = c.A1
+func randomMAC() string {
+	b := make([]byte, 6)
+	_, _ = rand.Read(b)
+	b[0] |= 0x02 // local
+	return fmt.Sprintf("%02x:%02x:%02x:%02x:%02x:%02x", b[0], b[1], b[2], b[3], b[4], b[5])
+}
+
+func (c *Client) ensureIdentity() {
+	if c.A1 == "" {
+		c.A1 = GenerateA1()
 	}
-	if c.WebID != "" {
-		m["webId"] = c.WebID
+	if c.WebID == "" {
+		c.WebID = GenerateWebID(c.A1)
 	}
-	if c.WebSession != "" {
-		m["web_session"] = c.WebSession
+	if c.DeviceID == "" {
+		c.DeviceID = randomMAC()
 	}
-	for k, v := range c.extra {
-		if v != "" {
-			m[k] = v
-		}
+	if c.Subsystem == "" {
+		c.Subsystem = "robs"
 	}
-	return m
 }
 
 func (c *Client) cookieHeader() string {
-	// Stable core order + extras (acw_tc first — WAF often wants it early).
-	parts := make([]string, 0, 8)
-	if v := c.extra["acw_tc"]; v != "" {
-		parts = append(parts, "acw_tc="+v)
+	c.ensureIdentity()
+	parts := []string{
+		"xsecappid=" + xsecAppLive,
+		"a1=" + c.A1,
+		"webId=" + c.WebID,
 	}
-	if c.A1 != "" {
-		parts = append(parts, "a1="+c.A1)
-	}
-	if c.WebID != "" {
-		parts = append(parts, "webId="+c.WebID)
-	}
-	if c.WebSession != "" {
-		parts = append(parts, "web_session="+c.WebSession)
-	}
-	parts = append(parts, "xsecappid="+c.XsecAppID)
-	for k, v := range c.extra {
-		if k == "acw_tc" || v == "" {
+	for k, v := range c.extraCookie {
+		if k == "xsecappid" || k == "a1" || k == "webId" || v == "" {
 			continue
 		}
 		parts = append(parts, k+"="+v)
@@ -87,14 +87,88 @@ func (c *Client) cookieHeader() string {
 	return strings.Join(parts, "; ")
 }
 
-// do signed JSON request. host is full origin (edithHost or wwwHost).
-// For GET, pass query; sign payload is that query map (keys sorted in SignXS).
-// For POST, pass payload object/raw JSON.
-func (c *Client) do(method, host, uri string, payload any, query url.Values) ([]byte, http.Header, error) {
-	var bodyJSON []byte
-	var err error
-	var signPayload any = payload
+func (c *Client) cookieMap() map[string]string {
+	c.ensureIdentity()
+	m := map[string]string{
+		"xsecappid": xsecAppLive,
+		"a1":        c.A1,
+		"webId":     c.WebID,
+	}
+	for k, v := range c.extraCookie {
+		if v != "" {
+			m[k] = v
+		}
+	}
+	return m
+}
 
+// SessionBlob is persisted in secrets (JSON inside secrets.File.Cookie).
+type SessionBlob struct {
+	AccessToken string            `json:"access_token"`
+	DeviceID    string            `json:"device_id"`
+	A1          string            `json:"a1"`
+	WebID       string            `json:"web_id"`
+	CookieExtra map[string]string `json:"cookie_extra,omitempty"`
+	UserID      string            `json:"user_id,omitempty"`
+	UserName    string            `json:"user_name,omitempty"`
+	RoomID      string            `json:"room_id,omitempty"`
+	LoginAt     time.Time         `json:"login_at,omitempty"`
+}
+
+func (c *Client) applySession(s *SessionBlob) {
+	if s == nil {
+		return
+	}
+	c.AccessToken = s.AccessToken
+	if s.DeviceID != "" {
+		c.DeviceID = s.DeviceID
+	}
+	if s.A1 != "" {
+		c.A1 = s.A1
+	}
+	if s.WebID != "" {
+		c.WebID = s.WebID
+	}
+	if s.CookieExtra != nil {
+		c.extraCookie = s.CookieExtra
+	}
+	c.UserID = s.UserID
+	c.UserName = s.UserName
+	c.RoomID = s.RoomID
+}
+
+func (c *Client) sessionBlob() *SessionBlob {
+	return &SessionBlob{
+		AccessToken: c.AccessToken,
+		DeviceID:    c.DeviceID,
+		A1:          c.A1,
+		WebID:       c.WebID,
+		CookieExtra: c.extraCookie,
+		UserID:      c.UserID,
+		UserName:    c.UserName,
+		RoomID:      c.RoomID,
+		LoginAt:     time.Now().UTC(),
+	}
+}
+
+func (c *Client) do(
+	method, host, path string,
+	jsonBody any,
+	query url.Values,
+	opts doOpts,
+) (map[string]any, error) {
+	c.ensureIdentity()
+
+	var bodyBytes []byte
+	var signPayload any
+	if jsonBody != nil {
+		var err error
+		bodyBytes, err = json.Marshal(jsonBody)
+		if err != nil {
+			return nil, err
+		}
+		signPayload = json.RawMessage(bodyBytes)
+	}
 	if method == http.MethodGet && query != nil {
 		m := map[string]any{}
 		for k, vs := range query {
@@ -104,183 +178,106 @@ func (c *Client) do(method, host, uri string, payload any, query url.Values) ([]
 		}
 		signPayload = m
 	}
-	if payload != nil && method != http.MethodGet {
-		switch t := payload.(type) {
-		case json.RawMessage:
-			bodyJSON = []byte(t)
-			signPayload = json.RawMessage(bodyJSON)
-		case []byte:
-			bodyJSON = t
-			signPayload = json.RawMessage(bodyJSON)
-		default:
-			bodyJSON, err = json.Marshal(payload)
-			if err != nil {
-				return nil, nil, err
-			}
-			signPayload = json.RawMessage(bodyJSON)
+
+	// CAS needs x-s; redobs start/stop often work without, but we sign when a1 present.
+	needSign := opts.sign || strings.Contains(host, "customer.xiaohongshu")
+	var signHS map[string]string
+	if needSign {
+		// override global xsec for live-helper
+		prev := xsecAppID
+		xsecAppID = xsecAppLive
+		var err error
+		signHS, err = SignHeaders(method, path, c.cookieMap(), signPayload)
+		xsecAppID = prev
+		if err != nil {
+			return nil, fmt.Errorf("sign: %w", err)
 		}
 	}
 
-	cm := c.cookieMap()
-	hs, err := SignHeaders(method, uri, cm, signPayload)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	full := host + uri
+	full := host + path
 	if query != nil && len(query) > 0 {
-		// Encode in the same key order SignXS uses (alphabetical) so x-s matches wire URL.
-		full += "?" + encodeQuerySorted(query)
+		full += "?" + query.Encode()
 	}
-
-	var body io.Reader
-	if bodyJSON != nil {
-		body = bytes.NewReader(bodyJSON)
+	var rdr io.Reader
+	if bodyBytes != nil {
+		rdr = bytes.NewReader(bodyBytes)
 	}
-	req, err := http.NewRequest(method, full, body)
+	req, err := http.NewRequest(method, full, rdr)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Accept", "application/json, text/plain, */*")
-	req.Header.Set("Origin", "https://www.xiaohongshu.com")
-	req.Header.Set("Referer", "https://www.xiaohongshu.com/")
 	req.Header.Set("Cookie", c.cookieHeader())
-	if bodyJSON != nil {
+	req.Header.Set("device-id", c.DeviceID)
+	req.Header.Set("subsystem", c.Subsystem)
+	if opts.originRobs {
+		req.Header.Set("Origin", hostRobs)
+		req.Header.Set("Referer", hostRobs+"/")
+	} else {
+		req.Header.Set("Origin", "https://www.xiaohongshu.com")
+		req.Header.Set("Referer", "https://www.xiaohongshu.com/")
+	}
+	if c.AccessToken != "" {
+		req.Header.Set("auth", c.AccessToken)
+		req.Header.Set("access-token", c.AccessToken)
+	}
+	if bodyBytes != nil {
 		req.Header.Set("Content-Type", "application/json;charset=UTF-8")
 	}
-	for k, v := range hs {
+	if opts.redobs {
+		req.Header.Set("xy-common-params", xyCommon)
+		req.Header.Set("xy-platform-info", xyCommon)
+	}
+	for k, v := range signHS {
 		req.Header.Set(k, v)
+	}
+	if req.Header.Get("x-t") == "" {
+		req.Header.Set("x-t", fmt.Sprintf("%d", time.Now().UnixMilli()))
 	}
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	defer resp.Body.Close()
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, nil, err
-	}
-	// Absorb Set-Cookie into fields (web_session on login success).
-	prevSession := c.WebSession
-	c.applySetCookie(resp.Header)
-	// XHS often returns HTTP 461/471 on captcha/WAF edges while body is still
-	// valid JSON (code=0). Treat business JSON as success; only hard-fail 4xx/5xx
-	// without a parseable success payload.
-	if resp.StatusCode >= 400 {
-		if bizOK(data) {
-			return data, resp.Header, nil
-		}
-		// session upgraded via Set-Cookie alone (login confirm path)
-		if c.WebSession != "" && c.WebSession != prevSession {
-			return data, resp.Header, nil
-		}
-		return data, resp.Header, fmt.Errorf("HTTP %d: %s", resp.StatusCode, truncate(string(data), 200))
-	}
-	return data, resp.Header, nil
-}
-
-func bizOK(data []byte) bool {
-	var top map[string]any
-	if json.Unmarshal(data, &top) != nil {
-		return false
-	}
-	if s, ok := top["success"].(bool); ok && s {
-		return true
-	}
-	switch c := top["code"].(type) {
-	case float64:
-		return c == 0
-	case int:
-		return c == 0
-	}
-	return false
-}
-
-func encodeQuerySorted(q url.Values) string {
-	// mirror url.Values.Encode (sorted keys)
-	return q.Encode()
-}
-
-func (c *Client) applySetCookie(h http.Header) {
-	// Go joins Set-Cookie; parse each.
-	for _, line := range h.Values("Set-Cookie") {
-		// name=value; Path=...
-		part := strings.SplitN(line, ";", 2)[0]
+	// absorb set-cookie extras
+	for _, sc := range resp.Header.Values("Set-Cookie") {
+		part := strings.SplitN(sc, ";", 2)[0]
 		k, v, ok := strings.Cut(part, "=")
 		if !ok {
 			continue
 		}
-		k = strings.TrimSpace(k)
-		v = strings.TrimSpace(v)
+		k, v = strings.TrimSpace(k), strings.TrimSpace(v)
 		switch k {
-		case "web_session":
-			if v != "" {
-				c.WebSession = v
-			}
 		case "a1":
-			if v != "" {
-				c.A1 = v
-				c.WebID = GenerateWebID(c.A1)
-			}
+			c.A1 = v
+			c.WebID = GenerateWebID(c.A1)
 		case "webId":
-			if v != "" {
-				c.WebID = v
+			c.WebID = v
+		case "web_session", "acw_tc", "websectiga", "sec_poison_id", "gid":
+			if c.extraCookie == nil {
+				c.extraCookie = map[string]string{}
 			}
+			c.extraCookie[k] = v
 		}
 	}
-	if os.Getenv("WEBCAST_MATE_DEBUG") != "" {
-		names := make([]string, 0)
-		for _, line := range h.Values("Set-Cookie") {
-			part := strings.SplitN(line, ";", 2)[0]
-			if k, _, ok := strings.Cut(part, "="); ok {
-				names = append(names, strings.TrimSpace(k))
-			}
-		}
-		if len(names) > 0 {
-			fmt.Fprintf(os.Stderr, "xiaohongshu: Set-Cookie names: %v session_len=%d\n", names, len(c.WebSession))
-		}
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
 	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("HTTP %d json: %w (%s)", resp.StatusCode, err, truncate(string(raw), 160))
+	}
+	out["_http"] = float64(resp.StatusCode)
+	return out, nil
 }
 
-func (c *Client) doEdith(method, uri string, payload any) ([]byte, error) {
-	c.XsecAppID = "xhs-pc-web"
-	b, _, err := c.do(method, edithHost, uri, payload, nil)
-	return b, err
-}
-
-func (c *Client) doEdithGET(uri string, query url.Values) ([]byte, error) {
-	c.XsecAppID = "xhs-pc-web"
-	b, _, err := c.do(http.MethodGet, edithHost, uri, nil, query)
-	return b, err
-}
-
-func (c *Client) doSpectrumGET(uri string, query url.Values) ([]byte, error) {
-	c.XsecAppID = "spectrum"
-	b, _, err := c.do(http.MethodGet, wwwHost, uri, nil, query)
-	return b, err
-}
-
-// DebugGET spectrum host.
-func (c *Client) DebugGET(uri string, query url.Values) ([]byte, error) {
-	return c.doSpectrumGET(uri, query)
-}
-
-// DebugEdithGET edith host.
-func (c *Client) DebugEdithGET(uri string, query url.Values) ([]byte, error) {
-	return c.doEdithGET(uri, query)
-}
-
-// DebugEdithPOST edith host.
-func (c *Client) DebugEdithPOST(uri string, payload any) ([]byte, error) {
-	return c.doEdith(http.MethodPost, uri, payload)
-}
-
-func randomPubKeyB64() string {
-	b := make([]byte, 32)
-	_, _ = rand.Read(b)
-	return base64.StdEncoding.EncodeToString(b)
+type doOpts struct {
+	sign       bool
+	redobs     bool
+	originRobs bool
 }
 
 func truncate(s string, n int) string {
@@ -290,45 +287,55 @@ func truncate(s string, n int) string {
 	return s[:n] + "…"
 }
 
-// EnsureWebGuest: a1 + activate → tourist web_session (needed before QR create).
-func (c *Client) EnsureWebGuest() error {
-	if c.A1 != "" && c.WebSession != "" {
-		return nil
-	}
-	if c.A1 == "" {
-		c.A1 = GenerateA1()
-	}
-	if c.WebID == "" {
-		c.WebID = GenerateWebID(c.A1)
-	}
-	c.XsecAppID = "xhs-pc-web"
-	uri := "/api/sns/web/v1/login/activate"
-	// Official web posts {} or client_public_key; both work. Prefer {}.
-	b, err := c.doEdith(http.MethodPost, uri, json.RawMessage(`{}`))
-	if err != nil {
-		// fallback key form
-		b, err = c.doEdith(http.MethodPost, uri, map[string]any{
-			"client_public_key_base64": randomPubKeyB64(),
-		})
-		if err != nil {
-			return err
+func anyString(v any) string {
+	switch t := v.(type) {
+	case string:
+		return t
+	case float64:
+		return fmt.Sprintf("%.0f", t)
+	case json.Number:
+		return t.String()
+	default:
+		if v == nil {
+			return ""
 		}
+		return fmt.Sprint(v)
 	}
-	var act struct {
-		Code    int  `json:"code"`
-		Success bool `json:"success"`
-		Data    struct {
-			UserID  string `json:"user_id"`
-			Session string `json:"session"`
-		} `json:"data"`
+}
+
+func anyInt(v any) int {
+	switch t := v.(type) {
+	case float64:
+		return int(t)
+	case int:
+		return t
+	case string:
+		var n int
+		fmt.Sscanf(t, "%d", &n)
+		return n
+	default:
+		return 0
 	}
-	if err := json.Unmarshal(b, &act); err != nil {
-		return err
+}
+
+func bizOK(m map[string]any) bool {
+	if m == nil {
+		return false
 	}
-	if !act.Success || act.Code != 0 || act.Data.Session == "" {
-		return fmt.Errorf("activate failed: %s", truncate(string(b), 200))
+	if s, ok := m["success"].(bool); ok && s {
+		return true
 	}
-	c.WebSession = act.Data.Session
-	c.UserID = act.Data.UserID
-	return nil
+	if anyInt(m["code"]) == 0 && m["code"] != nil {
+		return true
+	}
+	if anyInt(m["result"]) == 0 && m["result"] != nil {
+		return true
+	}
+	return false
+}
+
+// md5 hex helper used if GenerateWebID missing edge
+func md5HexStr(s string) string {
+	sum := md5.Sum([]byte(s))
+	return hex.EncodeToString(sum[:])
 }
