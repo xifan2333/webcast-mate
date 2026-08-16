@@ -10,6 +10,16 @@ import (
 )
 
 // ResolveConfig loads saved config, then either uses it (-y) or runs huh prompts.
+//
+// Form UX matches “npm init”: one page, all fields visible.
+//
+// huh Select notes (from docs + source):
+//   - Title() is the label above the list
+//   - Height(n) sizes the field; viewport gets n minus title/desc lines
+//   - Filtering(true) *enters* filter mode immediately and *replaces* Title
+//     with the search box — never use it if you want a visible Title
+//   - Prefer a moderate Height so the group does not clamp a 400-line list
+//     to the terminal height and crop the top
 func ResolveConfig(ctx context.Context, cli *Client, opts adapter.StartOpts) (*Config, error) {
 	_ = ctx
 	cfg, path, err := LoadConfigFile()
@@ -33,7 +43,16 @@ func ResolveConfig(ctx context.Context, cli *Client, opts adapter.StartOpts) (*C
 
 	_ = path
 
-	tree, treeErr := cli.ListAreaTree()
+	var areaOptions []huh.Option[string]
+	if areas, err := cli.ListAreas(); err == nil && len(areas) > 0 {
+		for _, a := range areas {
+			label := a.Name
+			if a.ParentName != "" {
+				label = a.ParentName + " / " + a.Name
+			}
+			areaOptions = append(areaOptions, huh.NewOption(label, a.ID))
+		}
+	}
 
 	roomID := cfg.RoomID
 	title := cfg.Title
@@ -43,22 +62,7 @@ func ResolveConfig(ctx context.Context, cli *Client, opts adapter.StartOpts) (*C
 		areaV2 = "21"
 	}
 
-	// Defaults for two-level area pick
-	parentID := ""
-	if tree != nil {
-		parentID = tree.FindParentOf(areaV2)
-		if parentID == "" && len(tree.Parents) > 0 {
-			parentID = tree.Parents[0].ID
-		}
-	}
-
-	// Critical huh Select quirks we avoid:
-	// 1) Filtering(true) *starts* filter mode and replaces Title with the search box
-	// 2) Height(n) sizes the WHOLE field; lipgloss crops the top → Title vanishes
-	// 3) Form clamps tall fields (hundreds of options) via WithHeight → same crop
-	// Fix: two-level 分区 (parent then child) keeps option lists short so Title stays.
-
-	gRoom := huh.NewGroup(
+	fields := []huh.Field{
 		huh.NewInput().
 			Title("直播间号").
 			Description("直播姬 / 直播中心显示的房间号（不是短号）").
@@ -69,75 +73,42 @@ func ResolveConfig(ctx context.Context, cli *Client, opts adapter.StartOpts) (*C
 				}
 				return nil
 			}),
-	)
-	gTitle := huh.NewGroup(
 		huh.NewInput().
 			Title("标题").
 			Description("留空则不修改当前标题").
 			Value(&title),
-	)
-
-	var groups []*huh.Group
-	groups = append(groups, gRoom, gTitle)
-
-	if treeErr == nil && tree != nil && len(tree.Parents) > 0 {
-		var parentOpts []huh.Option[string]
-		for _, p := range tree.Parents {
-			parentOpts = append(parentOpts, huh.NewOption(p.Name, p.ID))
-		}
-
-		// Capture tree for OptionsFunc
-		areaTree := tree
-		groups = append(groups,
-			huh.NewGroup(
-				huh.NewSelect[string]().
-					Title("分区").
-					Description("先选大类").
-					Options(parentOpts...).
-					Value(&parentID),
-			),
-			huh.NewGroup(
-				huh.NewSelect[string]().
-					Title("分区").
-					Description("再选具体分区").
-					// OptionsFunc re-evaluates when parentID changes
-					OptionsFunc(func() []huh.Option[string] {
-						kids := areaTree.Children[parentID]
-						opts := make([]huh.Option[string], 0, len(kids))
-						for _, k := range kids {
-							opts = append(opts, huh.NewOption(k.Name, k.ID))
-						}
-						if len(opts) == 0 {
-							opts = append(opts, huh.NewOption("（无子分区）", areaV2))
-						}
-						return opts
-					}, &parentID).
-					Value(&areaV2),
-			),
-		)
-	} else {
-		groups = append(groups, huh.NewGroup(
-			huh.NewInput().
-				Title("分区").
-				Description("未能拉取列表时，可填写分区编号").
-				Value(&areaV2).
-				Validate(func(s string) error {
-					if s == "" {
-						return fmt.Errorf("必填")
-					}
-					return nil
-				}),
-		))
 	}
 
-	groups = append(groups, huh.NewGroup(
-		huh.NewInput().
-			Title("封面").
-			Description("已有封面图链接（可选，留空跳过）").
-			Value(&cover),
-	))
+	if len(areaOptions) > 0 {
+		fields = append(fields, huh.NewSelect[string]().
+			Title("分区").
+			Description("本次直播所属分区").
+			Options(areaOptions...).
+			Value(&areaV2).
+			// Options list ~8 rows; title+description stay above (huh docs).
+			// Do not call Filtering(true): that starts filter mode and hides Title.
+			// Press "/" later if you need to search (default keymap).
+			Height(10))
+	} else {
+		fields = append(fields, huh.NewInput().
+			Title("分区").
+			Description("未能拉取列表时，可填写分区编号").
+			Value(&areaV2).
+			Validate(func(s string) error {
+				if s == "" {
+					return fmt.Errorf("必填")
+				}
+				return nil
+			}))
+	}
 
-	form := huh.NewForm(groups...).WithTheme(huh.ThemeCharm())
+	fields = append(fields, huh.NewInput().
+		Title("封面").
+		Description("已有封面图链接（可选，留空跳过）").
+		Value(&cover))
+
+	// Single group = one page, all fields together (original layout).
+	form := huh.NewForm(huh.NewGroup(fields...)).WithTheme(huh.ThemeCharm())
 	if err := form.Run(); err != nil {
 		return nil, err
 	}
