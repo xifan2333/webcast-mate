@@ -6,47 +6,58 @@ import (
 	"github.com/xifan2333/webcast-mate/internal/platform"
 )
 
-// StartResult is the fixed stdout payload for `start` (SPEC §5.3).
+// AuthBuckets is requests-style auth on stdout (same as secrets file).
+type AuthBuckets struct {
+	Cookies map[string]string `json:"cookies,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
+	Params  map[string]string `json:"params,omitempty"`
+}
+
 type StartResult struct {
 	Platform string `json:"platform"`
 	RoomID   string `json:"room_id"`
-	Cookie   string `json:"cookie"`
-	Server   string `json:"server"`
-	Key      string `json:"key"`
+	AuthBuckets
+	Server string `json:"server"`
+	Key    string `json:"key"`
 }
 
-// StopResult is the fixed stdout payload for `stop` (SPEC §5.3).
 type StopResult struct {
 	Platform string `json:"platform"`
 	RoomID   string `json:"room_id"`
-	Status   string `json:"status"` // always "stopped"
+	Status   string `json:"status"`
 }
 
-// StatusResult is stdout for `status` — same core fields as start, plus remote status.
 type StatusResult struct {
 	Platform string `json:"platform"`
 	RoomID   string `json:"room_id"`
-	Cookie   string `json:"cookie"`
-	Server   string `json:"server"`
-	Key      string `json:"key"`
-	// Status from platform query: live | idle | round (bilibili 轮播), etc.
+	AuthBuckets
+	Server string `json:"server"`
+	Key    string `json:"key"`
 	Status string `json:"status"`
 }
 
-// Adapter is the only platform extension point.
+type LoginResult struct {
+	Platform string `json:"platform"`
+	UserID   string `json:"user_id"`
+	UserName string `json:"user_name"`
+	AuthBuckets
+	LoginAt string `json:"login_at,omitempty"`
+}
+
+type LogoutResult struct {
+	Platform string `json:"platform"`
+	Status   string `json:"status"`
+}
+
 type Adapter interface {
 	ID() platform.ID
-	// Start ensures session, goes live, writes conf side-effects via caller,
-	// and returns the JSON fields. Douyin may start a keepalive externally.
-	// opts.Yes skips interactive prompts (npm-init style -y).
+	Login(ctx context.Context) (*LoginResult, error)
+	Logout(ctx context.Context) (*LogoutResult, error)
 	Start(ctx context.Context, opts StartOpts) (*StartResult, error)
-	// Stop ends the live session. Missing room must return success (idempotent).
 	Stop(ctx context.Context) (*StopResult, error)
-	// Status queries the platform for live state; fills cookie/server/key from local when known.
 	Status(ctx context.Context) (*StatusResult, error)
 }
 
-// Registry maps platform id → adapter.
 type Registry struct {
 	byID map[platform.ID]Adapter
 }
