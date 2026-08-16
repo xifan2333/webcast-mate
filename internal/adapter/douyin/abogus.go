@@ -1,286 +1,368 @@
 package douyin
 
+// Pure a_bogus (bdms 1.0.1.20) — port of ~/douyin-live/abogus_pure.py
+// No Chromium.
+
 import (
-	"encoding/json"
+	"crypto/rand"
+	"encoding/binary"
 	"fmt"
-	"io"
-	"net/http"
+	mrand "math/rand"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/tjfoc/gmsm/sm3"
 )
 
 const (
-	bdmsURL = "https://lf-c-flwb.bytetos.com/obj/rc-client-security/web/stable/1.0.1.20/bdms.js"
-	cdpPort = "9334" // avoid clash with pure_create 9333
+	s3                               = "ckdp1h4ZKsUB80/Mfvw36XIgR25+WQAlEi7NLboqYTOPuzmFjJnryx9HVGDaStCe"
+	s4                               = "Dkdpgh2ZmsQB80/MfvV36XI1R45-WUAlEixNLwoqYTOPuzKFjJnry79HbGcaStCe"
+	salt                             = "dhzx"
+	timeBaseMS                       = int64(1_721_836_800_000)
+	rc4KeyByte                       = byte(211)
+	magic                            = 41
+	versionStr                       = "1.0.1.20"
+	defaultScreen                    = "1366|768|1366|768|1366|768|1366|768|Win32"
+	m145, m110, m66, m189, m44, m211 = 145, 110, 66, 189, 44, 211
+	aa, bb                           = 170, 85
 )
 
-// SignABogus signs query+body for room/create.
-// Order:
-//  1. WEBCAST_MATE_DY_ABOGUS if set (caller-supplied)
-//  2. WEBCAST_MATE_DY_ABOGUS_CMD external command (stdin: JSON {query,body} → stdout a_bogus)
-//  3. headless chromium + official bdms 1.0.1.20 (same as ~/douyin-live/pure_create.py)
+var packOrder = []int{
+	34, 44, 56, 61, 73, 29, 70, 45, 35, 49, 38, 66, 51, 68, 28, 48, 64, 47, 30,
+	71, 26, 55, 31, 69, 59, 40, 62, 63, 27, 72, 41, 74, 57, 52, 42, 39, 33, 67,
+	53, 43, 65, 46, 36, 24, 60, 32, 79, 80, 84, 85,
+}
+
+var oracleSticky = map[int]int{
+	27: 6, 28: 3, 35: 5, 36: 0, 38: 1, 39: 0, 40: 0, 41: 0, 42: 0, 43: 0,
+	44: 14, 45: 0, 46: 0, 47: 0, 56: 48, 57: 240, 59: 249, 60: 255, 61: 19,
+	62: 9, 63: 204, 64: 146, 65: 1, 66: 3, 67: 44, 68: 157, 69: 0, 70: 0,
+	71: 31, 72: 8, 73: 0, 74: 0,
+}
+
+var stickyProtected = map[int]struct{}{
+	48: {}, 49: {}, 51: {}, 52: {}, 53: {}, 55: {},
+	29: {}, 30: {}, 31: {}, 32: {}, 33: {}, 34: {}, 24: {},
+	26: {}, 79: {}, 80: {}, 84: {}, 85: {},
+}
+
+type floatRNG interface{ Float64() float64 }
+
+// SignABogus pure local algo. Debug override: WEBCAST_MATE_DY_ABOGUS=<token>.
 func SignABogus(query, body string) (string, error) {
 	if v := strings.TrimSpace(os.Getenv("WEBCAST_MATE_DY_ABOGUS")); v != "" {
 		return v, nil
 	}
-	if cmd := strings.TrimSpace(os.Getenv("WEBCAST_MATE_DY_ABOGUS_CMD")); cmd != "" {
-		return signViaCmd(cmd, query, body)
-	}
-	return signViaChromiumBDMS(query, body)
+	return GenerateABogus(query, body, userAgent, 0, 0), nil
 }
 
-func signViaCmd(cmdline, query, body string) (string, error) {
-	payload, _ := json.Marshal(map[string]string{"query": query, "body": body})
-	c := exec.Command("sh", "-c", cmdline)
-	c.Stdin = strings.NewReader(string(payload))
-	out, err := c.Output()
-	if err != nil {
-		return "", fmt.Errorf("abogus cmd: %w", err)
+func GenerateABogus(query, body, ua string, tsMS, seed int64) string {
+	if ua == "" {
+		ua = userAgent
 	}
-	s := strings.TrimSpace(string(out))
-	if s == "" {
-		return "", fmt.Errorf("abogus cmd empty output")
+	if tsMS == 0 {
+		tsMS = time.Now().UnixMilli()
 	}
-	return s, nil
+	rng := newRNG(seed)
+	body93, verNums, L := buildPayload(query, body, ua, tsMS, defaultScreen, mrand.New(mrand.NewSource(0)), oracleSticky)
+	verG := fn147GarbleVersion(verNums, rng)
+	chk := xorChecksum(verG, L)
+	payload94 := append(append([]int{}, body93...), chk)
+	prefix := fn146Garble2([]int{3, 82}, 1, rng, "Chrome")
+	payG := fn148Garble3(payload94, rng)
+	rc4In := append(append([]int{}, verG...), payG...)
+	rc4Out := rc4Variant([]byte{rc4KeyByte}, rc4In)
+	raw := append(append([]int{}, prefix...), rc4Out...)
+	return b64Encode(raw, s4, true)
 }
 
-func cacheDir() string {
-	d := filepath.Join(os.TempDir(), "webcast-mate-dy")
-	_ = os.MkdirAll(d, 0o755)
-	return d
-}
-
-func ensureBDMS() (string, error) {
-	path := filepath.Join(cacheDir(), "bdms-1.0.1.20.js")
-	if st, err := os.Stat(path); err == nil && st.Size() > 10000 {
-		return path, nil
-	}
-	resp, err := http.Get(bdmsURL)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	b, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-	if err := os.WriteFile(path, b, 0o644); err != nil {
-		return "", err
-	}
-	return path, nil
-}
-
-func findChromium() string {
-	for _, n := range []string{"chromium", "chromium-browser", "google-chrome", "google-chrome-stable"} {
-		if p, err := exec.LookPath(n); err == nil {
-			return p
+func newRNG(seed int64) *mrand.Rand {
+	if seed == 0 {
+		var b [8]byte
+		if _, err := rand.Read(b[:]); err == nil {
+			seed = int64(binary.LittleEndian.Uint64(b[:]))
+		} else {
+			seed = time.Now().UnixNano()
 		}
 	}
-	return ""
+	return mrand.New(mrand.NewSource(seed))
 }
 
-func signViaChromiumBDMS(query, body string) (string, error) {
-	chrome := findChromium()
-	if chrome == "" {
-		return "", fmt.Errorf("chromium not found; set WEBCAST_MATE_DY_ABOGUS or WEBCAST_MATE_DY_ABOGUS_CMD (see docs)")
+func sm3Bytes(data []byte) []int {
+	h := sm3.Sm3Sum(data)
+	out := make([]int, len(h))
+	for i, v := range h {
+		out[i] = int(v)
 	}
-	bdms, err := ensureBDMS()
-	if err != nil {
-		return "", fmt.Errorf("bdms download: %w", err)
-	}
+	return out
+}
 
-	// Prefer Python helper from douyin-live if present (battle-tested CDP).
-	if p := os.Getenv("WEBCAST_MATE_DY_PURE_CREATE"); p != "" {
-		if _, err := os.Stat(p); err == nil {
-			return signViaPureCreatePy(p, query, body)
+func sm3DoubleSalt(s string) []int {
+	inner := sm3Bytes([]byte(s + salt))
+	buf := make([]byte, len(inner))
+	for i, v := range inner {
+		buf[i] = byte(v)
+	}
+	return sm3Bytes(buf)
+}
+
+func b64Encode(data []int, table string, forcePad bool) string {
+	alphabet := strings.TrimRight(table, "=")
+	pad := forcePad || strings.Contains(table, "=")
+	var out strings.Builder
+	n := len(data)
+	for i := 0; i < n; i += 3 {
+		b0 := data[i]
+		var b1, b2 *int
+		if i+1 < n {
+			v := data[i+1]
+			b1 = &v
+		}
+		if i+2 < n {
+			v := data[i+2]
+			b2 = &v
+		}
+		out.WriteByte(alphabet[(b0>>2)&63])
+		if b1 == nil {
+			out.WriteByte(alphabet[(b0&3)<<4])
+			if pad {
+				out.WriteString("==")
+			}
+		} else if b2 == nil {
+			out.WriteByte(alphabet[(((b0 & 3) << 4) | (*b1 >> 4))])
+			out.WriteByte(alphabet[(*b1&15)<<2])
+			if pad {
+				out.WriteByte('=')
+			}
+		} else {
+			out.WriteByte(alphabet[(((b0 & 3) << 4) | (*b1 >> 4))])
+			out.WriteByte(alphabet[(((*b1 & 15) << 2) | (*b2 >> 6))])
+			out.WriteByte(alphabet[*b2&63])
 		}
 	}
-	home, _ := os.UserHomeDir()
-	cand := filepath.Join(home, "douyin-live", "pure_create.py")
-	if _, err := os.Stat(cand); err == nil {
-		// use embedded CDP via python one-shot if uv/python available
-		if ab, err := signViaPythonSnippet(cand, query, body); err == nil && ab != "" {
-			return ab, nil
+	return out.String()
+}
+
+func rc4Variant(key []byte, data []int) []int {
+	S := make([]int, 256)
+	for i := 0; i < 256; i++ {
+		S[i] = 255 - i
+	}
+	j := 0
+	for i := 0; i < 256; i++ {
+		j = (j*S[i] + j + int(key[i%len(key)])) % 256
+		S[i], S[j] = S[j], S[i]
+	}
+	i := 0
+	j = 0
+	out := make([]int, len(data))
+	for k, b := range data {
+		i = (i + 1) % 256
+		j = (j + S[i]) % 256
+		S[i], S[j] = S[j], S[i]
+		out[k] = b ^ S[(S[i]+S[j])%256]
+	}
+	return out
+}
+
+func fn144Rand(rng floatRNG) int {
+	x := int(rng.Float64() * 240)
+	if x > 109 {
+		return x + (x % 2) + 1
+	}
+	return x
+}
+
+func fn143BrowserRand(name string, rng floatRNG) int {
+	r := int(rng.Float64() * 40)
+	switch name {
+	case "Chrome":
+		return r
+	case "Firefox":
+		return r + 40
+	case "Safari":
+		return r + 81
+	case "Edge":
+		return r + 125
+	case "Huawei":
+		return r + 170
+	default:
+		return r + 210
+	}
+}
+
+func fn145EnvFlags(rng floatRNG) int {
+	v := int(rng.Float64()*255) & 77
+	v |= 1 << 1
+	v |= 1 << 4
+	v |= 1 << 5
+	v |= 1 << 7
+	return v & 255
+}
+
+func fn146Garble2(pair []int, mode int, rng floatRNG, browser string) []int {
+	a0, a1 := pair[0]&255, pair[1]&255
+	rnd := int(rng.Float64() * 65535)
+	r0, r1 := rnd&255, (rnd>>8)&255
+	switch mode {
+	case 1:
+		r1 = fn143BrowserRand(browser, rng)
+	case 2:
+		r0 = fn144Rand(rng)
+		r1 = fn145EnvFlags(rng)
+	}
+	return []int{
+		(r0 & aa) | (a0 & bb),
+		(r0 & bb) | (a0 & aa),
+		(r1 & aa) | (a1 & bb),
+		(r1 & bb) | (a1 & aa),
+	}
+}
+
+func fn147GarbleVersion(arr4 []int, rng floatRNG) []int {
+	a := fn146Garble2([]int{arr4[0], arr4[1]}, 0, rng, "Chrome")
+	b := fn146Garble2([]int{arr4[2], arr4[3]}, 2, rng, "Chrome")
+	return append(a, b...)
+}
+
+func fn148Garble3(data []int, rng floatRNG) []int {
+	out := make([]int, 0, (len(data)/3)*4+2)
+	i, n := 0, len(data)
+	for i < n {
+		if i+2 < n {
+			rnd := int(rng.Float64()*1000) & 255
+			d0, d1, d2 := data[i], data[i+1], data[i+2]
+			out = append(out,
+				(rnd&m145)|(d0&m110),
+				(rnd&m66)|(d1&m189),
+				(rnd&m44)|(d2&m211),
+				(d0&m145)|(d1&m66)|(d2&m44),
+			)
+			i += 3
+		} else {
+			out = append(out, data[i])
+			if i+1 < n && data[i+1] != 0 {
+				out = append(out, data[i+1])
+			}
+			break
 		}
 	}
-
-	// Minimal CDP via chrome remote debugging + websockets not in go.mod —
-	// shell out to a tiny python inline using websocket-client if available,
-	// else instruct user.
-	_ = bdms
-	_ = chrome
-	return signViaInlinePython(chrome, bdms, query, body)
+	return out
 }
 
-func signViaPureCreatePy(path, query, body string) (string, error) {
-	// not used as full create — only if we add a --abogus-only later
-	_ = path
-	return "", fmt.Errorf("use inline")
+func pickHash(h []int, start, avoid, fb int) int {
+	i := start
+	for i < len(h) && h[i] == avoid {
+		i++
+	}
+	if i < len(h) {
+		return h[i]
+	}
+	return fb
 }
 
-func signViaPythonSnippet(pureCreatePath, query, body string) (string, error) {
-	// Call into pure_create.gen_abogus after starting chromium — heavy.
-	// Instead run a short script importing nothing from pure_create, duplicate gen.
-	return "", fmt.Errorf("skip")
+func timeDiffPeriods(ms int64) int {
+	if ms < timeBaseMS {
+		return 0
+	}
+	return int((ms - timeBaseMS) / 1000 / 60 / 60 / 24 / 14)
 }
 
-func signViaInlinePython(chrome, bdms, query, body string) (string, error) {
-	// Write a self-contained python script matching pure_create.gen_abogus
-	script := filepath.Join(cacheDir(), "sign_abogus.py")
-	py := fmt.Sprintf(`#!/usr/bin/env python3
-import json, time, urllib.request, subprocess, os, sys
-from pathlib import Path
-
-UA = %q
-QUERY = %q
-BODY = %q
-BDMS = %q
-CHROME = %q
-PORT = %q
-CACHE = Path(%q)
-
-def start():
-    subprocess.run(["pkill", "-f", f"remote-debugging-port={PORT}"], capture_output=True)
-    time.sleep(0.3)
-    profile = CACHE / "chrome-profile"
-    profile.mkdir(parents=True, exist_ok=True)
-    log = open(CACHE / "chrome.log", "w")
-    proc = subprocess.Popen(
-        [CHROME, "--headless=new", "--disable-gpu", "--no-sandbox",
-         "--enable-unsafe-swiftshader",
-         f"--remote-debugging-port={PORT}", "--remote-allow-origins=*",
-         f"--user-agent={UA}", f"--user-data-dir={profile}", "about:blank"],
-        stdout=log, stderr=log,
-    )
-    for _ in range(40):
-        try:
-            urllib.request.urlopen(f"http://127.0.0.1:{PORT}/json/version", timeout=1)
-            return proc
-        except Exception:
-            time.sleep(0.25)
-    raise SystemExit("cdp not ready")
-
-def gen(proc):
-    try:
-        import websocket
-    except ImportError:
-        print("need websocket-client: pip install websocket-client", file=sys.stderr)
-        raise SystemExit(2)
-    html_path = CACHE / "sign.html"
-    html = f"""<!DOCTYPE html><html><head><meta charset=utf-8></head><body>
-<script>
-(function(){{
-  Object.defineProperty(navigator,'platform',{{get:()=> 'Win32'}});
-  Object.defineProperty(navigator,'userAgent',{{get:()=> {UA!r}}});
-  Object.defineProperty(navigator,'webdriver',{{get:()=> false}});
-}})();
-window.__query = {QUERY!r};
-window.__body = {BODY!r};
-window.__urls = [];
-(function(){{
-  const o = XMLHttpRequest.prototype.open;
-  XMLHttpRequest.prototype.open = function(m,u){{ window.__urls.push(String(u)); return o.apply(this,arguments); }};
-  XMLHttpRequest.prototype.send = function(){{
-    try {{
-      Object.defineProperty(this,'readyState',{{configurable:true,get:()=>4}});
-      Object.defineProperty(this,'status',{{configurable:true,get:()=>200}});
-      Object.defineProperty(this,'responseText',{{configurable:true,get:()=>'{{}}'}});
-      if (this.onreadystatechange) try{{this.onreadystatechange()}}catch(e){{}}
-      if (this.onload) try{{this.onload()}}catch(e){{}}
-    }} catch(e){{}}
-  }};
-}})();
-</script>
-<script src="file://{BDMS}"></script>
-<script>
-(async()=>{{
-  try {{
-    if (!window.bdms) {{ document.title='ERR'; document.body.innerText='no bdms'; return; }}
-    window.bdms.init({{aid:2079,pageId:40236,paths:{{include:['/webcast/*']}},boe:false}});
-    await new Promise(r=>setTimeout(r,1500));
-    window.__urls=[];
-    const url='https://webcast-pc.amemv.com/webcast/room/create/?'+window.__query;
-    const x=new XMLHttpRequest(); x.open('POST',url);
-    x.setRequestHeader('Content-Type','application/x-www-form-urlencoded; charset=UTF-8');
-    x.send(window.__body||'');
-    await new Promise(r=>setTimeout(r,300));
-    const hit=window.__urls.find(u=>u.includes('a_bogus'))||'';
-    const m=hit.match(/a_bogus=([^&]+)/);
-    if(m){{ document.title='OK'; document.body.innerText=decodeURIComponent(m[1]); }}
-    else {{ document.title='FAIL'; document.body.innerText=JSON.stringify(window.__urls); }}
-  }} catch(e) {{ document.title='ERR'; document.body.innerText=String(e); }}
-}})();
-</script></body></html>"""
-    html_path.write_text(html)
-    ver = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{PORT}/json/version").read())
-    ws = websocket.create_connection(ver["webSocketDebuggerUrl"], timeout=20)
-    mid = 0
-    def send(method, params=None, session_id=None):
-        nonlocal mid
-        mid += 1
-        msg = {{"id": mid, "method": method, "params": params or {{}}}}
-        if session_id: msg["sessionId"] = session_id
-        ws.send(json.dumps(msg))
-        while True:
-            r = json.loads(ws.recv())
-            if r.get("id") == mid:
-                return r
-    r = send("Target.createTarget", {{"url": "about:blank"}})
-    tid = r["result"]["targetId"]
-    r = send("Target.attachToTarget", {{"targetId": tid, "flatten": True}})
-    sid = r["result"]["sessionId"]
-    send("Page.enable", session_id=sid)
-    send("Runtime.enable", session_id=sid)
-    send("Emulation.setUserAgentOverride",
-         {{"userAgent": UA, "platform": "Windows", "acceptLanguage": "zh-CN"}}, session_id=sid)
-    send("Page.navigate", {{"url": f"file://{html_path}"}}, session_id=sid)
-    time.sleep(5)
-    r = send("Runtime.evaluate",
-             {{"expression": "JSON.stringify({title:document.title,body:document.body.innerText.slice(0,400)})",
-              "returnByValue": True}}, session_id=sid)
-    val = json.loads(r["result"]["result"]["value"])
-    ws.close()
-    if val.get("title") != "OK":
-        raise SystemExit(f"sign fail: {val}")
-    print(val["body"].strip())
-
-proc = start()
-try:
-    gen(proc)
-finally:
-    proc.terminate()
-    try: proc.wait(timeout=3)
-    except Exception: proc.kill()
-    subprocess.run(["pkill", "-f", f"remote-debugging-port={PORT}"], capture_output=True)
-`, userAgent, query, body, bdms, chrome, cdpPort, cacheDir())
-
-	if err := os.WriteFile(script, []byte(py), 0o700); err != nil {
-		return "", err
+func bytesToInts(b []byte) []int {
+	out := make([]int, len(b))
+	for i, v := range b {
+		out[i] = int(v)
 	}
-	// prefer python3
-	python := "python3"
-	if p, err := exec.LookPath("python3"); err == nil {
-		python = p
+	return out
+}
+
+func buildPayload(query, body, ua string, tsMS int64, screen string, rng floatRNG, sticky map[int]int) (body93, verNums []int, L map[int]int) {
+	uh := sm3DoubleSalt(query)
+	var bh []int
+	if body != "" {
+		bh = sm3DoubleSalt(body)
+	} else {
+		bh = make([]int, 32)
 	}
-	cmd := exec.Command(python, script)
-	cmd.Env = os.Environ()
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("bdms sign: %w\n%s", err, truncate(string(out), 400))
+	uaB64 := b64Encode(bytesToInts([]byte(ua)), s3, true)
+	uaH := sm3Bytes([]byte(uaB64))
+	verNums = []int{}
+	for _, p := range strings.Split(versionStr, ".") {
+		var n int
+		fmt.Sscanf(p, "%d", &n)
+		verNums = append(verNums, n)
 	}
-	// last non-empty line
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	ab := strings.TrimSpace(lines[len(lines)-1])
-	if ab == "" || strings.HasPrefix(ab, "need ") || strings.HasPrefix(ab, "sign fail") {
-		return "", fmt.Errorf("bdms sign bad output: %s", truncate(string(out), 300))
+	for len(verNums) < 4 {
+		verNums = append(verNums, 0)
 	}
-	// sanity length
-	if len(ab) < 80 {
-		return "", fmt.Errorf("a_bogus too short: %q", ab)
+	verNums = verNums[:4]
+	env4 := fn145EnvFlags(rng)
+	br := fn143BrowserRand("Chrome", rng)
+	ink := (tsMS - 1) & ((1 << 48) - 1)
+	L = map[int]int{}
+	L[24] = magic
+	L[26] = timeDiffPeriods(tsMS) & 255
+	L[27] = br & 255
+	L[28] = 2
+	L[29] = int(tsMS) & 255
+	L[30] = int(tsMS>>8) & 255
+	L[31] = int(tsMS>>16) & 255
+	L[32] = int(tsMS>>24) & 255
+	L[33] = int(uint64(tsMS)/(256*256*256*256)) & 255
+	L[34] = int(uint64(tsMS)/(256*256*256*256*256)) & 255
+	L[35], L[36] = 0, 0
+	L[38] = env4 & 255
+	L[39] = 0
+	L[40], L[41], L[42], L[43] = 0, 0, 0, 0
+	L[44], L[45], L[46], L[47] = 0, 0, 0, 0
+	L[48], L[49] = uh[9], uh[18]
+	L[51] = pickHash(uh, 3, 11, 12)
+	if body != "" {
+		L[52], L[53], L[55] = bh[10], bh[19], pickHash(bh, 4, 8, 9)
 	}
-	_ = time.Second
-	return ab, nil
+	L[56], L[57] = uaH[11], uaH[21]
+	L[59] = pickHash(uaH, 5, 12, 13)
+	for i := 0; i < 6; i++ {
+		L[60+i] = int(ink>>(8*i)) & 255
+	}
+	L[66] = 3
+	for i := 67; i <= 74; i++ {
+		L[i] = 0
+	}
+	scr := []byte(screen)
+	tc := []byte(fmt.Sprintf("%d,", (tsMS+3)&255))
+	L[79], L[80] = len(scr)&255, (len(scr)>>8)&255
+	L[84], L[85] = len(tc)&255, (len(tc)>>8)&255
+	if sticky != nil {
+		for k, v := range sticky {
+			if _, ok := stickyProtected[k]; ok {
+				continue
+			}
+			L[k] = v
+		}
+	}
+	head := make([]int, len(packOrder))
+	for i, idx := range packOrder {
+		head[i] = L[idx] & 255
+	}
+	body93 = append(head, bytesToInts(scr)...)
+	body93 = append(body93, bytesToInts(tc)...)
+	return body93, verNums, L
+}
+
+func xorChecksum(verG []int, L map[int]int) int {
+	parts := append([]int{}, verG...)
+	for _, k := range []int{
+		24, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 38, 39, 40, 41, 42, 43,
+		44, 45, 46, 47, 48, 49, 51, 52, 53, 55, 56, 57, 59, 60, 61, 62, 63, 64,
+		65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 79, 80, 84, 85,
+	} {
+		parts = append(parts, L[k]&255)
+	}
+	c := 0
+	for _, x := range parts {
+		c ^= x & 255
+	}
+	return c & 255
 }

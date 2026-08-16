@@ -1,11 +1,29 @@
 package douyin
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"strings"
+	"time"
+
+	"github.com/xifan2333/webcast-mate/internal/conv"
+)
+
+// Face challenge from room/create status_code=4003028 (companion face-detect).
+const (
+	createFaceRequired = 4003028
+	faceStatusPending  = 0
+	faceStatusSuccess  = 1
+	faceStatusFailed   = 2
+	faceStatusError    = 3
+	facePollInterval   = 2 * time.Second
+	defaultFaceWait    = 10 * time.Minute
 )
 
 // CreateInfo → preschedule_key + cover uri.
@@ -16,7 +34,12 @@ func (c *Client) CreateInfo() (prekey, cover string, err error) {
 	form.Set("speed_test_info", "[]")
 	form.Set("live_room_mode", "1")
 	form.Set("orientation", "1")
-	m, err := c.postForm(hostPC+"/webcast/room/create_info/?"+q.Encode(), form, nil)
+	body := form.Encode()
+	qs, err := withABogus(q.Encode(), body)
+	if err != nil {
+		return "", "", err
+	}
+	m, err := c.postForm(hostAPI+"/webcast/room/create_info/?"+qs, form, nil)
 	if err != nil {
 		return "", "", err
 	}
@@ -28,10 +51,10 @@ func (c *Client) CreateInfo() (prekey, cover string, err error) {
 	if ps == nil {
 		return "", "", fmt.Errorf("create_info no preview_stream: %v", m)
 	}
-	prekey = anyString(ps["preschedule_key"])
+	prekey = conv.AnyString(ps["preschedule_key"])
 	coverM, _ := data["cover"].(map[string]any)
 	if coverM != nil {
-		cover = anyString(coverM["uri"])
+		cover = conv.AnyString(coverM["uri"])
 	}
 	if prekey == "" {
 		return "", "", fmt.Errorf("create_info empty prekey: %v", m)
@@ -39,14 +62,21 @@ func (c *Client) CreateInfo() (prekey, cover string, err error) {
 	return prekey, cover, nil
 }
 
-func buildCreateBody(title, prekey, cover string) string {
+func buildCreateBody(title, prekey, cover, categoryEnc string) string {
+	base, leaf := ParseCategoryValue(categoryEnc)
+	if base == "" {
+		base = "-1"
+	}
+	if leaf == "" {
+		leaf = "-1"
+	}
 	payload := `[["webcast","gift_menu_flow_mode","true"],["game","sei_change","true"],["game","pk_dual_screen","false"],["game","enable_rtc","true"],["webcast","client_ai_lab","false"],["webcast","client_ocr_lab","false"]]`
 	form := url.Values{}
 	form.Set("multi_resolution", "true")
 	form.Set("title", title)
 	form.Set("orientation", "1")
-	form.Set("base_category", "-1")
-	form.Set("category", "-1")
+	form.Set("base_category", base)
+	form.Set("category", leaf)
 	form.Set("has_commerce_goods", "false")
 	form.Set("disable_location_permission", "1")
 	form.Set("push_stream_type", "1")
@@ -78,27 +108,127 @@ type CreateResult struct {
 	Key      string
 }
 
-// CreateRoom: create_info → a_bogus → create → ping LIVING.
-func (c *Client) CreateRoom(title string) (*CreateResult, error) {
-	if title == "" {
-		title = "直播"
+// faceChallenge carries companion 4003028 extra fields.
+type faceChallenge struct {
+	AuthURL  string
+	Ticket   string
+	Scene    string
+	FaceType string
+	Prompt   string
+}
+
+func parseFaceChallenge(m map[string]any) *faceChallenge {
+	extra, _ := m["extra"].(map[string]any)
+	if extra == nil {
+		return nil
 	}
-	prekey, cover, err := c.CreateInfo()
+	u := conv.AnyString(extra["web_auth_address"])
+	if u == "" {
+		return nil
+	}
+	fc := &faceChallenge{
+		AuthURL:  u,
+		Ticket:   conv.AnyString(extra["ticket"]),
+		Scene:    conv.AnyString(extra["scene"]),
+		FaceType: conv.AnyString(extra["face_type"]),
+	}
+	if data, _ := m["data"].(map[string]any); data != nil {
+		fc.Prompt = conv.AnyString(data["prompts"])
+	}
+	return fc
+}
+
+func openAuthURL(u string) {
+	if u == "" {
+		return
+	}
+	// Prefer host browser (has real camera); fall back to printing URL.
+	for _, bin := range []string{"xdg-open", "gio"} {
+		if p, err := exec.LookPath(bin); err == nil {
+			cmd := exec.Command(p, u)
+			if bin == "gio" {
+				cmd = exec.Command(p, "open", u)
+			}
+			cmd.Stdout = nil
+			cmd.Stderr = nil
+			_ = cmd.Start()
+			return
+		}
+	}
+}
+
+// waitFaceResult polls companion get_face_result until SUCCESS/FAILED/timeout.
+// Companion: GET /webcast/anchor/pc_live/get_face_result/ every 2s.
+func (c *Client) waitFaceResult(ctx context.Context) error {
+	deadline := time.Now().Add(defaultFaceWait)
+	if dl, ok := ctx.Deadline(); ok && dl.Before(deadline) {
+		deadline = dl
+	}
+	failStreak := 0
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("face auth timeout (%s)", defaultFaceWait)
+		}
+		q := c.pingQuery()
+		qs, err := withABogus(q.Encode(), "")
+		if err != nil {
+			return err
+		}
+		m, err := c.getJSON(hostAPI+"/webcast/anchor/pc_live/get_face_result/?"+qs, nil)
+		if err != nil {
+			failStreak++
+			sleep := facePollInterval * time.Duration(failStreak)
+			if sleep > 10*time.Second {
+				sleep = 10 * time.Second
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(sleep):
+			}
+			continue
+		}
+		failStreak = 0
+		sc := conv.AnyInt(m["status_code"])
+		if sc != 0 {
+			// keep polling — companion only switches on data.status when sc==0
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(facePollInterval):
+			}
+			continue
+		}
+		data, _ := m["data"].(map[string]any)
+		st := faceStatusPending
+		if data != nil {
+			st = conv.AnyInt(data["status"])
+		}
+		switch st {
+		case faceStatusSuccess:
+			return nil
+		case faceStatusFailed, faceStatusError:
+			return fmt.Errorf("face auth failed (status=%d)", st)
+		default: // PENDING
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(facePollInterval):
+			}
+		}
+	}
+}
+
+func (c *Client) postCreateOnce(title, prekey, cover, categoryEnc string) (map[string]any, http.Header, error) {
+	body := buildCreateBody(title, prekey, cover, categoryEnc)
+	query, err := withABogus(c.commonQuery().Encode(), body)
 	if err != nil {
-		return nil, err
+		return nil, nil, fmt.Errorf("%w: %v", ErrABogus, err)
 	}
-	fmt.Fprintf(os.Stderr, "douyin: create_info ok prekey_len=%d\n", len(prekey))
-
-	body := buildCreateBody(title, prekey, cover)
-	query := c.commonQuery().Encode()
-
-	ab, err := SignABogus(query, body)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrABogus, err)
-	}
-	fmt.Fprintf(os.Stderr, "douyin: a_bogus len=%d\n", len(ab))
-
-	full := hostPC + "/webcast/room/create/?" + query + "&a_bogus=" + url.QueryEscape(ab)
+	full := hostAPI + "/webcast/room/create/?" + query
 	extra := map[string]string{
 		"bd-ticket-guard-client-data":       ticketData(),
 		"bd-ticket-guard-version":           "2",
@@ -107,65 +237,145 @@ func (c *Client) CreateRoom(title string) (*CreateResult, error) {
 		"sec-ch-ua-mobile":                  "?0",
 		"sec-ch-ua-platform":                `"Windows"`,
 	}
-	b, err := c.do("POST", full, strings.NewReader(body), "application/x-www-form-urlencoded; charset=UTF-8", extra)
+	b, hdr, err := c.doHDR("POST", full, strings.NewReader(body), "application/x-www-form-urlencoded; charset=UTF-8", extra)
 	if err != nil {
-		return nil, err
+		return nil, hdr, err
 	}
 	var m map[string]any
 	if err := json.Unmarshal(b, &m); err != nil {
-		return nil, err
+		return nil, hdr, err
 	}
-	sc, _ := m["status_code"].(float64)
-	if sc != 0 {
-		return nil, fmt.Errorf("room/create status_code=%v data=%v", sc, m["data"])
-	}
+	return m, hdr, nil
+}
+
+func parseCreateOK(m map[string]any) (*CreateResult, error) {
 	data := mapData(m)
 	if data == nil {
-		return nil, fmt.Errorf("room/create no data: %s", truncate(string(b), 200))
+		return nil, fmt.Errorf("room/create no data")
 	}
-	roomID := anyString(data["id_str"])
+	roomID := conv.AnyString(data["id_str"])
 	if roomID == "" {
-		roomID = anyString(data["id"])
+		roomID = conv.AnyString(data["id"])
 	}
-	streamID := anyString(data["stream_id_str"])
+	streamID := conv.AnyString(data["stream_id_str"])
 	if streamID == "" {
-		streamID = anyString(data["stream_id"])
+		streamID = conv.AnyString(data["stream_id"])
 	}
 	su, _ := data["stream_url"].(map[string]any)
 	push := ""
 	if su != nil {
-		push = anyString(su["rtmp_push_url"])
+		push = conv.AnyString(su["rtmp_push_url"])
 		if push == "" {
-			push = anyString(su["rtmps_push_url"])
+			push = conv.AnyString(su["rtmps_push_url"])
 		}
 	}
 	if push == "" {
 		return nil, fmt.Errorf("room/create no rtmp_push_url")
-	}
-	if err := c.PingAnchor(roomID, streamID, RoomLiving); err != nil {
-		fmt.Fprintf(os.Stderr, "douyin: warn ping LIVING: %v\n", err)
-	} else {
-		fmt.Fprintln(os.Stderr, "douyin: ping LIVING ok")
 	}
 	server, key := splitPushURL(push)
 	return &CreateResult{
 		RoomID:   roomID,
 		StreamID: streamID,
 		PushURL:  push,
-		Title:    anyString(data["title"]),
+		Title:    conv.AnyString(data["title"]),
 		Server:   server,
 		Key:      key,
 	}, nil
 }
 
+// CreateRoom: create_info → create; on 4003028 open face URL, poll get_face_result, retry create → ping LIVING.
+// categoryEnc is "base|leaf" from ListCategories; empty keeps -1/-1.
+func (c *Client) CreateRoom(ctx context.Context, title, categoryEnc string) (*CreateResult, error) {
+	if title == "" {
+		title = "Live"
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	prekey, cover, err := c.CreateInfo()
+	if err != nil {
+		return nil, err
+	}
+
+	var cr *CreateResult
+	for attempt := 0; attempt < 3; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		// refresh prekey on retries after face (companion re-enters create flow)
+		if attempt > 0 {
+			prekey, cover, err = c.CreateInfo()
+			if err != nil {
+				return nil, err
+			}
+		}
+		m, hdr, err := c.postCreateOnce(title, prekey, cover, categoryEnc)
+		if err != nil {
+			return nil, err
+		}
+		// companion: response header forces secondary passport verify
+		if hdr != nil && hdr.Get("x-tt-verify-passport-decision") != "" {
+			return nil, &CreateError{
+				Code:   conv.AnyInt(m["status_code"]),
+				Kind:   "passport",
+				Prompt: "passport secondary verification required (re-login)",
+				Err:    ErrPassportVerify,
+			}
+		}
+		sc := conv.AnyInt(m["status_code"])
+		if sc == 0 {
+			cr, err = parseCreateOK(m)
+			if err != nil {
+				return nil, err
+			}
+			break
+		}
+		ce := classifyCreateResponse(m)
+		if ce != nil && ce.Kind == "face" && ce.AuthURL != "" {
+			// stderr only: face prompt + URL (same contract as QR)
+			fmt.Fprintln(os.Stderr, "douyin: face verification required")
+			if ce.Prompt != "" {
+				fmt.Fprintln(os.Stderr, ce.Prompt)
+			}
+			fmt.Fprintln(os.Stderr, ce.AuthURL)
+			fmt.Fprintln(os.Stderr, "complete face auth in the browser (camera), then wait…")
+			openAuthURL(ce.AuthURL)
+			if err := c.waitFaceResult(ctx); err != nil {
+				if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+					return nil, fmt.Errorf("%w: %v", ErrFaceRequired, err)
+				}
+				return nil, fmt.Errorf("%w: %v", ErrFaceFailed, err)
+			}
+			fmt.Fprintln(os.Stderr, "douyin: face auth ok, retrying create…")
+			continue
+		}
+		if ce == nil {
+			ce = &CreateError{Code: sc, Kind: "unknown", Err: ErrCreateFailed}
+		}
+		return nil, ce
+	}
+	if cr == nil {
+		return nil, fmt.Errorf("room/create: still blocked after face retries")
+	}
+	if err := c.PingAnchor(cr.RoomID, cr.StreamID, RoomLiving); err != nil {
+		return nil, fmt.Errorf("ping LIVING: %w", err)
+	}
+	return cr, nil
+}
+
 // PingAnchor reports room status (2=LIVING, 4=FINISH).
 func (c *Client) PingAnchor(roomID, streamID string, status int) error {
-	q := c.commonQuery()
+	q := c.pingQuery()
 	form := url.Values{}
 	form.Set("room_id", roomID)
 	form.Set("stream_id", streamID)
 	form.Set("status", fmt.Sprintf("%d", status))
-	m, err := c.postForm(hostAPI+"/webcast/room/ping/anchor/?"+q.Encode(), form, nil)
+	body := form.Encode()
+	qs, err := withABogus(q.Encode(), body)
+	if err != nil {
+		return err
+	}
+	m, err := c.postForm(hostAPI+"/webcast/room/ping/anchor/?"+qs, form, nil)
 	if err != nil {
 		return err
 	}
@@ -178,15 +388,23 @@ func (c *Client) PingAnchor(roomID, streamID string, status int) error {
 
 // CheckRoomExist probes room presence.
 func (c *Client) CheckRoomExist(roomID string) (map[string]any, error) {
-	q := c.commonQuery()
+	q := c.pingQuery()
 	q.Set("room_id", roomID)
-	return c.getJSON(hostAPI+"/webcast/room/check_exist/?"+q.Encode(), nil)
+	qs, err := withABogus(q.Encode(), "")
+	if err != nil {
+		return nil, err
+	}
+	return c.getJSON(hostAPI+"/webcast/room/check_exist/?"+qs, nil)
 }
 
 // PCObsStatus best-effort remote live status.
 func (c *Client) PCObsStatus() (map[string]any, error) {
-	q := c.commonQuery()
-	return c.getJSON(hostAPI+"/webcast/room/get_pc_obs_status/?"+q.Encode(), nil)
+	q := c.pingQuery()
+	qs, err := withABogus(q.Encode(), "")
+	if err != nil {
+		return nil, err
+	}
+	return c.getJSON(hostAPI+"/webcast/room/get_pc_obs_status/?"+qs, nil)
 }
 
 func splitPushURL(push string) (server, key string) {

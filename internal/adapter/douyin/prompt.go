@@ -7,14 +7,19 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/xifan2333/webcast-mate/internal/adapter"
 	"github.com/xifan2333/webcast-mate/internal/appcfg"
+	"github.com/xifan2333/webcast-mate/internal/conv"
+	"github.com/xifan2333/webcast-mate/internal/platform"
 )
 
 // OpenConfig is start-time prefs for douyin.
+// Area is "base|leaf" (Category.EncodeValue); empty → "-1|-1" at create.
+// Cover is never prompted (create_info uri).
 type OpenConfig struct {
 	Title string
+	Area  string // base|leaf
 }
 
-func ResolveOpenConfig(ctx context.Context, opts adapter.StartOpts) (*OpenConfig, error) {
+func ResolveOpenConfig(ctx context.Context, cli *Client, opts adapter.StartOpts) (*OpenConfig, error) {
 	_ = ctx
 	_ = appcfg.EnsureExists()
 	file, err := appcfg.Load()
@@ -22,50 +27,69 @@ func ResolveOpenConfig(ctx context.Context, opts adapter.StartOpts) (*OpenConfig
 		return nil, err
 	}
 	cfg := &OpenConfig{}
-	if p := file.GetPlatform("douyin"); p.Title != "" {
-		cfg.Title = p.Title
+	if p := file.GetPlatform(platform.Douyin); true {
+		if p.Title != "" {
+			cfg.Title = p.Title
+		}
+		if p.Area != "" {
+			cfg.Area = p.Area
+		}
 	}
 	if t := os.Getenv("WEBCAST_MATE_DY_TITLE"); t != "" {
 		cfg.Title = t
 	}
-	if opts.Yes {
+	if c := os.Getenv("WEBCAST_MATE_DY_AREA"); c != "" {
+		cfg.Area = c
+	}
+	// legacy env
+	if c := os.Getenv("WEBCAST_MATE_DY_CATEGORY"); c != "" && cfg.Area == "" {
+		cfg.Area = c
+	}
+
+	var areaOptions []huh.Option[string]
+	if cli != nil {
+		if list, err := cli.ListCategories(); err == nil {
+			for _, c := range list {
+				areaOptions = append(areaOptions, huh.NewOption(c.Label(), c.EncodeValue()))
+			}
+		}
+	}
+
+	if opts.Yes || !conv.IsInteractive() {
 		if cfg.Title == "" {
-			cfg.Title = "直播"
+			cfg.Title = "Live"
 		}
 		return cfg, nil
 	}
-	if !isInteractive() {
-		if cfg.Title == "" {
-			cfg.Title = "直播"
-		}
-		return cfg, nil
-	}
+
 	title := cfg.Title
-	form := huh.NewForm(huh.NewGroup(
-		huh.NewInput().
-			Title("标题").
-			Description("直播间标题").
-			Value(&title),
-	)).WithTheme(huh.ThemeCharm())
-	if err := form.Run(); err != nil {
+	area := cfg.Area
+	fields := []huh.Field{
+		huh.NewInput().Title("Title").Value(&title),
+	}
+	if len(areaOptions) > 0 {
+		fields = append(fields, huh.NewSelect[string]().
+			Title("Area").
+			Description("/ to filter").
+			Options(areaOptions...).
+			Value(&area).
+			Height(12).
+			Filtering(true))
+	} else {
+		fields = append(fields, huh.NewInput().Title("Area").Value(&area))
+	}
+	if err := huh.NewForm(huh.NewGroup(fields...)).WithTheme(huh.ThemeCharm()).Run(); err != nil {
 		return nil, err
 	}
 	if title == "" {
-		title = "直播"
+		title = "Live"
 	}
 	cfg.Title = title
-	// persist title preference
-	p := file.GetPlatform("douyin")
+	cfg.Area = area
+	p := file.GetPlatform(platform.Douyin)
 	p.Title = title
-	file.Platforms["douyin"] = p
+	p.Area = area
+	file.Platforms[string(platform.Douyin)] = p
 	_ = appcfg.Save(file)
 	return cfg, nil
-}
-
-func isInteractive() bool {
-	fi, err := os.Stdin.Stat()
-	if err != nil {
-		return false
-	}
-	return (fi.Mode() & os.ModeCharDevice) != 0
 }

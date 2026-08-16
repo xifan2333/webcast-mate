@@ -5,33 +5,65 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/url"
-	"os"
-	"path/filepath"
 	"time"
 
-	qrcode "github.com/skip2/go-qrcode"
+	"github.com/xifan2333/webcast-mate/internal/conv"
+	"github.com/xifan2333/webcast-mate/internal/platform"
 	"github.com/xifan2333/webcast-mate/internal/secrets"
 	"github.com/xifan2333/webcast-mate/internal/termimg"
 )
 
 // EnsureLogin loads secrets or runs streamingtool QR login.
+// Order: restore secrets → EnsureDevice (reuse or device_register) →
+// session check; never overwrite a persisted did with a new random one.
 func (c *Client) EnsureLogin(ctx context.Context) (*secrets.File, error) {
-	if s, err := secrets.Load("douyin"); err == nil && s.Cookie != "" {
-		c.setCookieHeader(s.Cookie)
-		if ok, uid, name := c.checkSession(); ok {
-			s.UserID = uid
-			s.UserName = name
-			return s, nil
+	var sec *secrets.File
+	if s, err := secrets.Load(platform.Douyin); err == nil && s.HasAuth() {
+		c.ApplySecrets(s)
+		sec = s
+	}
+	if err := c.EnsureDevice(ctx); err != nil {
+		return nil, err
+	}
+	// EnsureDevice may have written/updated did/iid; reload so session save keeps them.
+	if s, err := secrets.Load(platform.Douyin); err == nil {
+		// keep cookies already applied on client; merge params onto sec snapshot
+		if sec == nil {
+			sec = s
+		} else if s.Params != nil {
+			if sec.Params == nil {
+				sec.Params = map[string]string{}
+			}
+			for k, v := range s.Params {
+				sec.Params[k] = v
+			}
 		}
-		fmt.Fprintln(os.Stderr, "douyin: saved session invalid, re-login")
+	}
+	if sec != nil && sec.HasAuth() {
+		if ok, uid, name := c.checkSession(); ok {
+			sec.UserID = uid
+			sec.UserName = name
+			if sec.Params == nil {
+				sec.Params = map[string]string{}
+			}
+			if c.DeviceID != "" {
+				sec.Params["did"] = c.DeviceID
+				sec.Params["iid"] = c.IID
+			}
+			_ = secrets.Save(platform.Douyin, sec)
+			return sec, nil
+		}
 	}
 	return c.loginQR(ctx)
 }
 
 func (c *Client) checkSession() (ok bool, uid, name string) {
-	// user/me on webcast
-	q := c.commonQuery()
-	m, err := c.getJSON(hostAPI+"/webcast/user/me/?"+q.Encode(), nil)
+	// user/me on webcast — short query + pure a_bogus
+	qs, err := withABogus(c.pingQuery().Encode(), "")
+	if err != nil {
+		return false, "", ""
+	}
+	m, err := c.getJSON(hostAPI+"/webcast/user/me/?"+qs, nil)
 	if err != nil {
 		return false, "", ""
 	}
@@ -45,9 +77,9 @@ func (c *Client) checkSession() (ok bool, uid, name string) {
 	if data == nil {
 		return c.checkAccountInfo()
 	}
-	uid = anyString(data["id_str"])
+	uid = conv.AnyString(data["id_str"])
 	if uid == "" {
-		uid = anyString(data["id"])
+		uid = conv.AnyString(data["id"])
 	}
 	if n, ok := data["nickname"].(string); ok {
 		name = n
@@ -66,8 +98,12 @@ func (c *Client) checkSession() (ok bool, uid, name string) {
 }
 
 func (c *Client) checkAccountInfo() (bool, string, string) {
-	q := c.sdkParams()
-	m, err := c.getJSON(hostStreaming+"/passport/account/info/v2/?"+q.Encode(), nil)
+	q := c.passportQuery()
+	qs, err := withABogus(q.Encode(), "")
+	if err != nil {
+		return false, "", ""
+	}
+	m, err := c.getJSON(hostStreaming+"/passport/account/info/v2/?"+qs, nil)
 	if err != nil {
 		return false, "", ""
 	}
@@ -75,7 +111,7 @@ func (c *Client) checkAccountInfo() (bool, string, string) {
 	if data == nil {
 		return cookieHasSession(c.cookieHeader()), "", ""
 	}
-	uid := anyString(data["user_id"])
+	uid := conv.AnyString(data["user_id"])
 	name, _ := data["screen_name"].(string)
 	if name == "" {
 		name, _ = data["username"].(string)
@@ -155,102 +191,139 @@ func (c *Client) ensureTTWid() error {
 	return nil
 }
 
+// loginQR follows webcast_mate 38514 QR state machine (not login.py):
+//
+//	poll interval G: 1s → 3s after 60 checks → 5s after 180 checks
+//	status new/scanned → keep polling
+//	confirmed → success (session from Set-Cookie on that response)
+//	refused/expired → refresh QR from response up to 5 times, else fail
+//	catch: error_code 6 / ECONNABORTED ≤3; bare network ≤3; else stop
+//	error_code 7 is NOT retried (companion fail branch) — do not spam
 func (c *Client) loginQR(ctx context.Context) (*secrets.File, error) {
 	if err := c.ensureTTWid(); err != nil {
 		return nil, fmt.Errorf("ttwid: %w", err)
 	}
 
-	token, qrURL, err := c.getQRCode()
+	token, png, content, err := c.getQRCode()
 	if err != nil {
 		return nil, err
 	}
-	fmt.Fprintln(os.Stderr, "douyin: scan QR with Douyin app")
-	if qrURL != "" {
-		fmt.Fprintln(os.Stderr, qrURL)
-	}
-	printQR(qrURL)
+	closeQR := termimg.ShowQR(png, content)
+	defer func() { closeQR() }()
 
-	// Align with ~/douyin-live/login.py poll_until_login:
-	// error 7 = 访问太频繁 → wait 8s, do NOT re-issue QR
-	// 2156/1105 = 系统繁忙 → wait 3s
-	deadline := time.Now().Add(4 * time.Minute)
-	last := ""
-	scanned := false
-	interval := time.Second
+	var (
+		pollN       int // R.current — check attempts
+		intervalS   = 1 // G.current seconds
+		refreshN    int // H.current — expired/refused auto-refresh
+		net6N       int // q.current — error_code 6 / abort
+		netBareN    int // V.current — error with empty code
+		maxRefresh  = 5
+		maxNetRetry = 3
+	)
+
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if time.Now().After(deadline) {
+		// companion has no hard wall-clock deadline; bound runaway polls (~180*5s)
+		if pollN > 240 {
 			return nil, ErrQRTimeout
 		}
-		st, redirect, errCode, err := c.checkQR(token)
+
+		pollN++
+		if pollN >= 180 {
+			intervalS = 5
+		} else if pollN >= 60 && intervalS < 5 {
+			intervalS = 3
+		}
+
+		res, err := c.checkQR(token)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "douyin: poll err: %v\n", err)
-			sleep(ctx, interval)
+			// transport-level: count as bare network retry (companion V.current)
+			netBareN++
+			if netBareN > maxNetRetry {
+				return nil, err
+			}
+			sleep(ctx, time.Duration(intervalS)*time.Second)
 			continue
 		}
-		// Session may already be set while API still returns busy after confirm.
-		if cookieHasSession(c.cookieHeader()) && (scanned || errCode == 7 || errCode == 2156 || st == "confirmed") {
-			return c.finishLogin("")
+
+		// confirmed may leave session cookies even if status parse is odd
+		if res.Status == "confirmed" || (cookieHasSession(c.cookieHeader()) && res.Status == "") {
+			if cookieHasSession(c.cookieHeader()) {
+				return c.finishLogin(res.Redirect)
+			}
+			return c.finishLogin(res.Redirect)
 		}
-		// retryable — same waits as login.py (7 → 8s, others → 3s)
-		if errCode == 7 || errCode == 2156 || errCode == 1105 {
-			wait := 3 * time.Second
-			if errCode == 7 {
-				wait = 8 * time.Second
+
+		switch {
+		case res.ErrCode == 6:
+			// companion: error_code 6 or ECONNABORTED → ≤3 continues
+			net6N++
+			if net6N > maxNetRetry {
+				return nil, fmt.Errorf("check_qrconnect error_code=6 after %d retries", maxNetRetry)
 			}
-			if last != fmt.Sprintf("busy-%d", errCode) {
-				fmt.Fprintf(os.Stderr, "douyin: %d rate-limit/busy — wait %ds, keep same QR (do not rescan)\n",
-					errCode, int(wait.Seconds()))
-				last = fmt.Sprintf("busy-%d", errCode)
+		case res.ErrCode != 0:
+			// companion: any other error_code (incl. 7) → fail, do not backoff-spam
+			if res.ErrCode == 7 {
+				return nil, fmt.Errorf("%w: %s", ErrQRRateLimit, res.Description)
 			}
-			// stretch deadline while backing off after scan/confirm
-			if scanned {
-				deadline = deadline.Add(wait)
+			if res.Description != "" {
+				return nil, fmt.Errorf("check_qrconnect error_code=%d %s", res.ErrCode, res.Description)
 			}
-			sleep(ctx, wait)
-			continue
-		}
-		if st != last {
-			last = st
-			switch st {
-			case "new":
-				fmt.Fprintln(os.Stderr, "douyin: waiting for scan…")
-			case "scanned":
-				scanned = true
-				interval = 2 * time.Second
-				fmt.Fprintln(os.Stderr, "douyin: scanned — confirm on phone")
-			case "confirmed":
-				fmt.Fprintln(os.Stderr, "douyin: confirmed")
-			case "refused":
-				return nil, ErrQRRefused
-			case "expired":
-				return nil, ErrQRExpired
-			default:
-				if st != "" {
-					fmt.Fprintf(os.Stderr, "douyin: status=%s\n", st)
+			return nil, fmt.Errorf("check_qrconnect error_code=%d", res.ErrCode)
+
+		case res.Status == "new", res.Status == "scanned":
+			// keep polling
+
+		case res.Status == "refused", res.Status == "expired":
+			// companion: refresh QR from payload up to 5 times
+			if refreshN >= maxRefresh {
+				if res.Status == "refused" {
+					return nil, ErrQRRefused
 				}
+				return nil, ErrQRExpired
 			}
-		}
-		if st == "confirmed" {
-			if redirect != "" {
-				_, _ = c.do("GET", redirect, nil, "", nil)
+			refreshN++
+			if res.NewToken == "" {
+				// no replacement token in body — hard fail like companion after budget
+				if res.Status == "refused" {
+					return nil, ErrQRRefused
+				}
+				return nil, ErrQRExpired
 			}
-			sleep(ctx, 500*time.Millisecond)
-			return c.finishLogin(redirect)
+			token = res.NewToken
+			closeQR()
+			closeQR = termimg.ShowQR(res.NewPNG, res.NewContent)
+			// reset soft network counters on fresh code; keep poll cadence
+			net6N, netBareN = 0, 0
+
+		default:
+			if res.Status == "" && res.ErrCode == 0 {
+				// empty oddity: treat like bare retry
+				netBareN++
+				if netBareN > maxNetRetry {
+					return nil, fmt.Errorf("check_qrconnect: empty status")
+				}
+				break
+			}
+			return nil, fmt.Errorf("check_qrconnect unexpected status %q", res.Status)
 		}
-		if st == "expired" {
-			return nil, ErrQRExpired
-		}
-		if st == "refused" {
-			return nil, ErrQRRefused
-		}
-		if scanned {
-			interval = 2 * time.Second
-		}
-		sleep(ctx, interval)
+
+		sleep(ctx, time.Duration(intervalS)*time.Second)
 	}
+}
+
+// qrCheck is one check_qrconnect outcome (companion Q() then-branch).
+type qrCheck struct {
+	Status      string
+	Redirect    string
+	ErrCode     int
+	Description string
+	// refresh payload when status is refused/expired
+	NewToken   string
+	NewPNG     []byte
+	NewContent string
 }
 
 func (c *Client) finishLogin(redirect string) (*secrets.File, error) {
@@ -262,151 +335,148 @@ func (c *Client) finishLogin(redirect string) (*secrets.File, error) {
 		return nil, fmt.Errorf("login settled but no session cookie yet")
 	}
 	_, uid, name := c.checkSession()
-	s := &secrets.File{
-		Cookie:   c.cookieHeader(),
-		UserID:   uid,
-		UserName: name,
-		LoginAt:  time.Now().UTC(),
-	}
-	if err := secrets.Save("douyin", s); err != nil {
+	s := c.ExportSecrets(uid, name, time.Now().UTC())
+	if err := secrets.Save(platform.Douyin, s); err != nil {
 		return nil, err
 	}
-	if name != "" {
-		fmt.Fprintf(os.Stderr, "douyin: logged in as %s\n", name)
-	}
-	fmt.Fprintln(os.Stderr, "douyin: QR login ok")
 	return s, nil
 }
 
-// getQRCode returns poll token and a URL suitable for terminal QR (same as bili/xhs).
-func (c *Client) getQRCode() (token, qrURL string, err error) {
-	q := c.sdkParams()
+// getQRCode returns poll token, a pre-rendered PNG (if the API gave one),
+// and a content URL (ASCII fallback).
+func (c *Client) getQRCode() (token string, png []byte, content string, err error) {
+	q := c.passportQuery()
 	q.Set("next", hostStreaming)
 	q.Set("need_logo", "false")
 	q.Set("need_short_url", "false")
 	q.Set("is_new_login", "1")
-	m, err := c.getJSON(hostStreaming+"/passport/web/get_qrcode/?"+q.Encode(), nil)
+	qs, err := withABogus(q.Encode(), "")
 	if err != nil {
-		return "", "", err
+		return "", nil, "", err
+	}
+	m, err := c.getJSON(hostStreaming+"/passport/web/get_qrcode/?"+qs, nil)
+	if err != nil {
+		return "", nil, "", err
 	}
 	data := mapData(m)
 	if data == nil {
-		return "", "", fmt.Errorf("get_qrcode: %v", m)
+		return "", nil, "", fmt.Errorf("get_qrcode: %v", m)
 	}
-	if ec := anyString(data["error_code"]); ec != "" && ec != "0" {
-		return "", "", fmt.Errorf("get_qrcode error_code=%s msg=%v", ec, data["description"])
+	if ec := conv.AnyString(data["error_code"]); ec != "" && ec != "0" {
+		return "", nil, "", fmt.Errorf("get_qrcode error_code=%s msg=%v", ec, data["description"])
 	}
-	token = anyString(data["token"])
+	token = conv.AnyString(data["token"])
 	if token == "" {
-		return "", "", fmt.Errorf("get_qrcode missing token")
+		return "", nil, "", fmt.Errorf("get_qrcode missing token")
 	}
-	// Prefer scan URL for go-qrcode (same display path as bilibili/xhs).
+	// Prefer the server-rendered PNG (uniform size) over a long URL.
+	if b64 := conv.AnyString(data["qrcode"]); b64 != "" {
+		png = decodeQRBase64(b64)
+	}
 	for _, k := range []string{"qrcode_index_url", "qrcode_url", "url"} {
-		if u := anyString(data[k]); u != "" {
-			qrURL = u
+		if u := conv.AnyString(data[k]); u != "" {
+			content = u
 			break
 		}
 	}
-	if qrURL == "" {
-		// API often only returns PNG base64; decode and show via Kitty, else write file.
-		b64 := anyString(data["qrcode"])
-		if b64 == "" {
-			return "", "", fmt.Errorf("get_qrcode missing qrcode")
-		}
-		if i := indexOf(b64, ","); i >= 0 && hasPrefix(b64, "data:") {
-			b64 = b64[i+1:]
-		}
-		png, decErr := base64.StdEncoding.DecodeString(b64)
-		if decErr != nil {
-			png, decErr = base64.RawStdEncoding.DecodeString(b64)
-		}
-		if decErr != nil {
-			return token, "", fmt.Errorf("qrcode b64: %w", decErr)
-		}
-		printQRPNG(png)
-		return token, "", nil
+	if len(png) == 0 && content == "" {
+		return "", nil, "", fmt.Errorf("get_qrcode missing qrcode")
 	}
-	return token, qrURL, nil
+	return token, png, content, nil
 }
 
-func (c *Client) checkQR(token string) (status, redirect string, errCode int, err error) {
-	q := c.sdkParams()
+func (c *Client) checkQR(token string) (qrCheck, error) {
+	q := c.passportQuery()
 	form := url.Values{}
-	form.Set("token", token)
-	form.Set("next", hostStreaming)
 	form.Set("need_logo", "false")
 	form.Set("need_short_url", "false")
-	form.Set("is_frontier", "false")
+	form.Set("is_frontier", "true")
+	form.Set("token", token)
 	form.Set("is_new_login", "1")
-	form.Set("aid", aid)
-	m, err := c.postForm(hostStreaming+"/passport/web/check_qrconnect/?"+q.Encode(), form, nil)
+	form.Set("next", "https://www.douyin.com")
+	body := form.Encode()
+	qs, err := withABogus(q.Encode(), body)
 	if err != nil {
-		return "", "", 0, err
+		return qrCheck{}, err
 	}
+	m, err := c.postForm(hostStreaming+"/passport/web/check_qrconnect/?"+qs, form, nil)
+	if err != nil {
+		return qrCheck{}, err
+	}
+	out := qrCheck{}
 	data := mapData(m)
 	if data == nil {
-		// top-level error_code sometimes
-		errCode = anyInt(m["error_code"])
-		if errCode == 0 {
-			errCode = anyInt(m["status_code"])
+		out.ErrCode = conv.AnyInt(m["error_code"])
+		if out.ErrCode == 0 {
+			out.ErrCode = conv.AnyInt(m["status_code"])
 		}
-		if errCode == 7 || errCode == 2156 || errCode == 1105 {
-			return "", "", errCode, nil
+		out.Description = conv.AnyString(m["description"])
+		if out.ErrCode == 0 {
+			return out, fmt.Errorf("check_qrconnect: %v", m)
 		}
-		return "", "", 0, fmt.Errorf("check_qrconnect: %v", m)
+		return out, nil
 	}
-	errCode = anyInt(data["error_code"])
-	msg, _ := m["message"].(string)
-	// login.py: message != success + retryable error_code → backoff
-	if msg != "" && msg != "success" && (errCode == 7 || errCode == 2156 || errCode == 1105) {
-		return "", "", errCode, nil
+	out.ErrCode = conv.AnyInt(data["error_code"])
+	out.Description = conv.AnyString(data["description"])
+	if out.Description == "" {
+		out.Description = conv.AnyString(data["captcha"])
 	}
-	if errCode == 7 || errCode == 2156 || errCode == 1105 {
-		return "", "", errCode, nil
+	// business error_code on data (incl. 7) — caller decides; no special 8s retry
+	if out.ErrCode != 0 {
+		return out, nil
 	}
-	if errCode != 0 {
-		// non-retryable business error
-		desc := anyString(data["description"])
-		if desc == "" {
-			desc = anyString(data["captcha"])
+	// some failures only set message != success with nested code
+	if msg, _ := m["message"].(string); msg != "" && msg != "success" {
+		if ec := conv.AnyInt(m["error_code"]); ec != 0 {
+			out.ErrCode = ec
+			return out, nil
 		}
-		return "", "", errCode, fmt.Errorf("check_qrconnect error_code=%d %s", errCode, desc)
 	}
-	status = anyString(data["status"])
-	switch status {
+
+	out.Status = conv.AnyString(data["status"])
+	switch out.Status {
 	case "1":
-		status = "new"
+		out.Status = "new"
 	case "2":
-		status = "scanned"
+		out.Status = "scanned"
 	case "3":
-		status = "confirmed"
+		out.Status = "confirmed"
 	case "4":
-		status = "refused"
+		out.Status = "refused"
 	case "5":
-		status = "expired"
+		out.Status = "expired"
 	}
-	redirect = anyString(data["redirect_url"])
-	if redirect == "" {
-		redirect = anyString(data["url"])
+	out.Redirect = conv.AnyString(data["redirect_url"])
+	if out.Redirect == "" {
+		out.Redirect = conv.AnyString(data["url"])
 	}
-	return status, redirect, 0, nil
+	// companion refused/expired path may embed next qrcode+token
+	if out.Status == "refused" || out.Status == "expired" {
+		out.NewToken = conv.AnyString(data["token"])
+		if b64 := conv.AnyString(data["qrcode"]); b64 != "" {
+			out.NewPNG = decodeQRBase64(b64)
+		}
+		for _, k := range []string{"qrcode_index_url", "qrcode_url", "url"} {
+			if u := conv.AnyString(data[k]); u != "" {
+				out.NewContent = u
+				break
+			}
+		}
+	}
+	return out, nil
 }
 
-func anyInt(v any) int {
-	switch t := v.(type) {
-	case float64:
-		return int(t)
-	case int:
-		return t
-	case int64:
-		return int(t)
-	case string:
-		var n int
-		fmt.Sscanf(t, "%d", &n)
-		return n
-	default:
-		return 0
+func decodeQRBase64(b64 string) []byte {
+	if i := indexOf(b64, ","); i >= 0 && hasPrefix(b64, "data:") {
+		b64 = b64[i+1:]
 	}
+	if p, err := base64.StdEncoding.DecodeString(b64); err == nil {
+		return p
+	}
+	if p, err := base64.RawStdEncoding.DecodeString(b64); err == nil {
+		return p
+	}
+	return nil
 }
 
 func sleep(ctx context.Context, d time.Duration) {
@@ -414,39 +484,6 @@ func sleep(ctx context.Context, d time.Duration) {
 	case <-ctx.Done():
 	case <-time.After(d):
 	}
-}
-
-// printQR matches bilibili/xiaohongshu: Kitty graphics PNG, else ToSmallString.
-func printQR(content string) {
-	if content == "" {
-		return
-	}
-	q, err := qrcode.New(content, qrcode.Medium)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "douyin: qr: %v\n", err)
-		return
-	}
-	if termimg.SupportsKitty() {
-		png, err := q.PNG(280)
-		if err == nil && termimg.WriteKittyPNG(os.Stderr, png) == nil {
-			return
-		}
-	}
-	fmt.Fprint(os.Stderr, q.ToSmallString(false))
-}
-
-// printQRPNG when API only returns a PNG (no index URL).
-func printQRPNG(png []byte) {
-	if len(png) == 0 {
-		return
-	}
-	if termimg.SupportsKitty() && termimg.WriteKittyPNG(os.Stderr, png) == nil {
-		return
-	}
-	_ = os.MkdirAll(filepath.Join(os.TempDir(), "webcast-mate"), 0o755)
-	path := filepath.Join(os.TempDir(), "webcast-mate", "douyin-qr.png")
-	_ = os.WriteFile(path, png, 0o600)
-	fmt.Fprintf(os.Stderr, "douyin: QR image %s\n", path)
 }
 
 func indexOf(s, sub string) int {
