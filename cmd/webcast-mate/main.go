@@ -10,6 +10,7 @@ import (
 	"github.com/xifan2333/webcast-mate/internal/adapter"
 	"github.com/xifan2333/webcast-mate/internal/adapter/bilibili"
 	"github.com/xifan2333/webcast-mate/internal/adapter/stub"
+	"github.com/xifan2333/webcast-mate/internal/adapter/xiaohongshu"
 	"github.com/xifan2333/webcast-mate/internal/appdir"
 	"github.com/xifan2333/webcast-mate/internal/platform"
 )
@@ -97,7 +98,8 @@ CONFIG
 
 STATUS
   bilibili: QR login + huh prompts (title/area/cover) + start/stop; -y skips prompts
-  douyin / xiaohongshu: stub
+  xiaohongshu: QR (+ SMS sid for live) + start/stop/status
+  douyin: stub
 `, configRootDisplay())
 }
 
@@ -105,7 +107,7 @@ func registry() *adapter.Registry {
 	return adapter.NewRegistry(
 		bilibili.New(),
 		stub.New(platform.Douyin),
-		stub.New(platform.XiaoHongShu),
+		xiaohongshu.New(),
 	)
 }
 
