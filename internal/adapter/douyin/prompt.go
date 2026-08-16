@@ -41,10 +41,6 @@ func ResolveOpenConfig(ctx context.Context, cli *Client, opts adapter.StartOpts)
 	if c := os.Getenv("WEBCAST_MATE_DY_AREA"); c != "" {
 		cfg.Area = c
 	}
-	// legacy env
-	if c := os.Getenv("WEBCAST_MATE_DY_CATEGORY"); c != "" && cfg.Area == "" {
-		cfg.Area = c
-	}
 
 	var areaOptions []huh.Option[string]
 	if cli != nil {

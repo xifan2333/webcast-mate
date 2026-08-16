@@ -59,25 +59,6 @@ func Load() (*File, error) {
 	if f.Platforms == nil {
 		f.Platforms = map[string]Platform{}
 	}
-	// migrate legacy area_v2 → area
-	var raw map[string]any
-	if yaml.Unmarshal(b, &raw) == nil {
-		if plats, _ := raw["platforms"].(map[string]any); plats != nil {
-			for id, pv := range plats {
-				pm, _ := pv.(map[string]any)
-				if pm == nil {
-					continue
-				}
-				p := f.Platforms[id]
-				if p.Area == "" {
-					if v, ok := pm["area_v2"].(string); ok && v != "" {
-						p.Area = v
-						f.Platforms[string(id)] = p
-					}
-				}
-			}
-		}
-	}
 	if f.Defaults.VideoBitrate == 0 {
 		f.Defaults.VideoBitrate = 3200
 	}
