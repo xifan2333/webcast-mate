@@ -16,13 +16,18 @@ import (
 	"github.com/xifan2333/webcast-mate/internal/termimg"
 )
 
+// loadSession reads secrets as a Cookie header string (+ user meta).
+// Supports legacy JSON blob once (migrates on next save).
 func loadSession() (*SessionBlob, error) {
 	f, err := secrets.Load("xiaohongshu")
 	if err != nil {
 		return nil, err
 	}
-	// Prefer JSON blob in Cookie field
-	if len(f.Cookie) > 0 && f.Cookie[0] == '{' {
+	if f.Cookie == "" {
+		return nil, os.ErrNotExist
+	}
+	// one-shot migrate: old JSON in Cookie field
+	if f.Cookie[0] == '{' {
 		var s SessionBlob
 		if err := json.Unmarshal([]byte(f.Cookie), &s); err != nil {
 			return nil, err
@@ -33,23 +38,75 @@ func loadSession() (*SessionBlob, error) {
 		if s.UserName == "" {
 			s.UserName = f.UserName
 		}
+		if s.LoginAt.IsZero() {
+			s.LoginAt = f.LoginAt
+		}
 		return &s, nil
 	}
-	// legacy plain cookie — not usable for helper AT path
-	return nil, os.ErrNotExist
+	s := parseCookieSession(f.Cookie)
+	if s.UserID == "" {
+		s.UserID = f.UserID
+	}
+	if s.UserName == "" {
+		s.UserName = f.UserName
+	}
+	s.LoginAt = f.LoginAt
+	if s.AccessToken == "" && s.A1 == "" {
+		return nil, os.ErrNotExist
+	}
+	return s, nil
 }
 
 func saveSession(s *SessionBlob) error {
-	b, err := json.Marshal(s)
-	if err != nil {
-		return err
+	if s == nil {
+		return fmt.Errorf("nil session")
 	}
+	if s.LoginAt.IsZero() {
+		s.LoginAt = time.Now().UTC()
+	}
+	// rebuild client-shaped cookie for stable serialize
+	c := NewClient()
+	c.applySession(s)
 	return secrets.Save("xiaohongshu", &secrets.File{
-		Cookie:   string(b),
+		Cookie:   c.CookieHeader(),
 		UserID:   s.UserID,
 		UserName: s.UserName,
 		LoginAt:  s.LoginAt,
 	})
+}
+
+// parseCookieSession turns "k=v; k2=v2" into SessionBlob.
+func parseCookieSession(header string) *SessionBlob {
+	s := &SessionBlob{CookieExtra: map[string]string{}}
+	for _, part := range strings.Split(header, ";") {
+		part = strings.TrimSpace(part)
+		k, v, ok := strings.Cut(part, "=")
+		if !ok {
+			continue
+		}
+		k, v = strings.TrimSpace(k), strings.TrimSpace(v)
+		switch strings.ToLower(k) {
+		case "access-token", "auth":
+			if v != "" {
+				s.AccessToken = v
+			}
+		case "a1":
+			s.A1 = v
+		case "webid":
+			s.WebID = v
+		case "device-id":
+			s.DeviceID = v
+		case "xhs-room-id", "room_id", "room-id":
+			s.RoomID = v
+		case "xsecappid":
+			// ignore fixed app id
+		default:
+			if v != "" {
+				s.CookieExtra[k] = v
+			}
+		}
+	}
+	return s
 }
 
 // EnsureLogin loads AT session or runs CAS QR login.

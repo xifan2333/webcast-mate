@@ -71,26 +71,31 @@ func (c *Client) ensureIdentity() {
 	}
 }
 
-// CookieHeader is the HTTP Cookie header string for stdout / wire requests.
-// Includes a1/webId/xsecappid + sticky extras; access_token is also appended as
-// access-token= / auth= so downstream tools that only get "cookie" can recover AT.
+// CookieHeader is secrets/stdout: cookie-like k=v list including AT + device-id + room.
+// Wire HTTP Cookie uses wireCookieHeader() (browser cookies only).
 func (c *Client) CookieHeader() string {
-	return c.cookieHeader()
-}
-
-func (c *Client) cookieHeader() string {
 	c.ensureIdentity()
-	parts := make([]string, 0, 8)
+	parts := make([]string, 0, 12)
 	if c.AccessToken != "" {
-		// not browser cookies, but helper auth often travels with cookie field in our CLI
 		parts = append(parts, "access-token="+c.AccessToken, "auth="+c.AccessToken)
 	}
-	parts = append(parts,
-		"xsecappid="+xsecAppLive,
-		"a1="+c.A1,
-		"webId="+c.WebID,
-	)
-	// stable-ish order for extras
+	if c.DeviceID != "" {
+		parts = append(parts, "device-id="+c.DeviceID)
+	}
+	if c.RoomID != "" {
+		parts = append(parts, "xhs-room-id="+c.RoomID)
+	}
+	parts = append(parts, c.wireCookieHeader())
+	return strings.Join(parts, "; ")
+}
+
+func (c *Client) wireCookieHeader() string {
+	c.ensureIdentity()
+	parts := []string{
+		"xsecappid=" + xsecAppLive,
+		"a1=" + c.A1,
+		"webId=" + c.WebID,
+	}
 	for _, k := range []string{"acw_tc", "websectiga", "sec_poison_id", "gid", "web_session"} {
 		if v := c.extraCookie[k]; v != "" {
 			parts = append(parts, k+"="+v)
@@ -98,7 +103,8 @@ func (c *Client) cookieHeader() string {
 	}
 	for k, v := range c.extraCookie {
 		switch k {
-		case "xsecappid", "a1", "webId", "acw_tc", "websectiga", "sec_poison_id", "gid", "web_session", "access-token", "auth":
+		case "xsecappid", "a1", "webId", "acw_tc", "websectiga", "sec_poison_id", "gid", "web_session",
+			"access-token", "auth", "device-id", "xhs-room-id":
 			continue
 		}
 		if v != "" {
@@ -123,17 +129,17 @@ func (c *Client) cookieMap() map[string]string {
 	return m
 }
 
-// SessionBlob is persisted in secrets (JSON inside secrets.File.Cookie).
+// SessionBlob is in-memory session; secrets store CookieHeader() string only.
 type SessionBlob struct {
-	AccessToken string            `json:"access_token"`
-	DeviceID    string            `json:"device_id"`
-	A1          string            `json:"a1"`
-	WebID       string            `json:"web_id"`
-	CookieExtra map[string]string `json:"cookie_extra,omitempty"`
-	UserID      string            `json:"user_id,omitempty"`
-	UserName    string            `json:"user_name,omitempty"`
-	RoomID      string            `json:"room_id,omitempty"`
-	LoginAt     time.Time         `json:"login_at,omitempty"`
+	AccessToken string
+	DeviceID    string
+	A1          string
+	WebID       string
+	CookieExtra map[string]string
+	UserID      string
+	UserName    string
+	RoomID      string
+	LoginAt     time.Time
 }
 
 func (c *Client) applySession(s *SessionBlob) {
@@ -229,7 +235,7 @@ func (c *Client) do(
 	}
 	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Accept", "application/json, text/plain, */*")
-	req.Header.Set("Cookie", c.cookieHeader())
+	req.Header.Set("Cookie", c.wireCookieHeader())
 	req.Header.Set("device-id", c.DeviceID)
 	req.Header.Set("subsystem", c.Subsystem)
 	if opts.originRobs {
