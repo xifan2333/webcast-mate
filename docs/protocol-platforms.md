@@ -262,153 +262,90 @@ ttwid → get_qrcode → check_qrconnect(confirmed) → 桌面 Cookie
 
 > 弹幕/长连接协议（RWP）见独立文档 [protocol-xhs-danmaku.md](./protocol-xhs-danmaku.md)（与开播/推流码无关）。
 
-两条线：**电脑助手 robs**（协议完整）和 **网页 6 位码换密钥**（半手动）。
+**本仓库不做**旧电脑助手 `robs.xiaohongshu.com` 短信 `sid` + `live/pre|start|stop` 链路（第三方复刻年代偏旧，不是 2026 官方主推）。
 
-### 3.A 电脑助手协议（推荐实现）
+### 3.1 网页 OBS（6 位连接码 → 推流地址）
 
-Host：`https://robs.xiaohongshu.com`  
-UA（第三方助手）：
+人对人主路径（官方教程一致）：
 
-```
-Mozilla/5.0 … live-helper/2.6.6 Chrome/89.0.4389.128 Electron/12.0.11 …
-env/production platform/win32 appname/xhs-live
-```
+1. 手机小红书预直播页 →「电脑」tab → **6 位连接码**（关播再开通常要新码）
+2. 电脑侧已登录网页会话（见下）后：
+3. `GET https://www.xiaohongshu.com/web_api/sns/v1/live/obs/push_url?code={6位码}`  
+   - Cookie：登录后的 `a1` / `webId` / `web_session` 等  
+   - `xsecappid=spectrum`，请求需 `x-s` / `x-t` 签名  
+4. 解析完整 `push_url`（或等价字段）→ 拆 `server` + `key` 写入 `live.json`
+5. OBS / gsr 推流；手机侧如需再点「进入直播」
+6. **关播**：以手机结束直播为主；CLI `stop` 清本地 `live.json`（远端协议 stop 不走旧 robs）
 
-公共 Header：`device-id: {mac-like}`；登录后加 `sid: {access_token}`。
+相关只读 API（spectrum / 同站，探活用）：
 
-#### 登录（短信）
+| 用途 | Path |
+|------|------|
+| 六位码换密钥 | `/web_api/sns/v1/live/obs/push_url` |
+| 直播中取码 | `/web_api/sns/v1/live/obs/living_push_url` |
+| 主机 OBS 信息 | `/web_api/sns/v1/live/obs/host_auth_info` |
+| OBS 授权 | `/web_api/sns/v1/live/obs/apply_obs_auth` |
 
-| 步骤 | 接口 | Body |
-|------|------|------|
-| 发码 | `POST /api/sns/send_sms` | form: `phone_number, phone_country=86` |
-| 登录 | `POST /api/sns/login_by_sms` | form: `phone_number, phone_country=86, sms_code` |
-
-成功：`result==0`，`data.access_token` → 之后所有请求 Header `sid`。  
-校验：`GET /api/sns/check_login`（`result!=0` 则会话失效）。
-
-#### 开播
-
-Query 常挂在 PC 信息上（可简化，但助手带了）：
-
-```
-build=2200002&platform=pc&system_version=10.0.22000&cpu_model=…&gpu=…&is_win_7=false
-```
-
-| 步骤 | 接口 | 说明 |
-|------|------|------|
-| 准备 | `GET /api/sns/live/pre?{PC_QS}` | Header `sid` |
-| 开播 | `POST /api/sns/live/{room_id}/start?{PC_QS}` | JSON body |
-
-**pre 成功 `data`：**
-
-- `room_id`
-- `name`（标题）
-- `cover`
-- `url.push_url` ← **完整 rtmp 推流地址**
-
-**start body：**
-
-```json
-{
-  "name": "直播间名",
-  "notice": "",
-  "is_distribute": true,
-  "cover": "https://picasso-static.xiaohongshu.com/…",
-  "lesson_id": 0
-}
-```
-
-`result==0` 才算开播。
-
-#### 关播
-
-```
-POST /api/sns/live/{room_id}/stop
-Header: sid
-Body: {}
-```
-
-#### 推流 conf
-
-官方固定 server（网页文档）：
+固定 server（官方 OBS 文档）：
 
 ```
 rtmp://live-push.xhscdn.com/live
 ```
 
-`push_url` 可能是完整 `rtmp://live-push.xhscdn.com/live/{key}?…`：
+`push_url` 常为完整 `rtmp://live-push.xhscdn.com/live/{key}?…`，拆法：
 
-```ini
-[xiaohongshu]
+```
 server = rtmp://live-push.xhscdn.com/live
-key    = {从 push_url 拆出的 path 最后一段 + query}
-video_bitrate = 4000
-audio_bitrate = 128
+key    = path 最后一段 + query
 ```
 
 或 gsr 直接 `-o "{完整 push_url}"`。
 
-#### 状态
+页面入口（人用）：`https://www.xiaohongshu.com/zhibo/obs`（历史上也有 `zhibo/robs` 落地页名，**不等于**实现 robs 短信 API）。
 
-`GET /api/sns/live/check_live`（Header `sid`）
+#### webcast-mate 目标行为
 
-#### 封面（可选）
-
-1. `GET https://www.xiaohongshu.com/fe_common_api/burdock/upload/v4/qcloud/token?bucket=picasso&bizKey=livehelper&…`
-2. 表单上传 COS（key / Signature / x-cos-security-token / file）
-3. cover = `https://picasso-static.xiaohongshu.com/{key}`
-
-### 3.B 网页半自动（不依赖 robs 登录）
-
-1. 手机小红书预直播页 →「电脑」tab → 6 位码（约 12h 有效）
-2. 浏览器打开 `https://www.xiaohongshu.com/zhibo/robs` 登录
-3. 页面 API（spectrum 前端，host 同站 / edith）：
-
-| 常量 | Path |
-|------|------|
-| APPLY_OBS_AUTH | `/web_api/sns/v1/live/obs/apply_obs_auth` |
-| USER_OBS_KEY | `/web_api/sns/v1/live/obs/push_url` |
-| USER_OBS_AUTH | `/web_api/sns/v1/live/obs/host_auth_info` |
-| GET_LIVING_PUSH_URL | `/web_api/sns/v1/live/obs/living_push_url` |
-
-4. server 固定 `rtmp://live-push.xhscdn.com/live`，密钥页上展示  
-5. 手机点「进入直播」；**每次关播再开都要新 6 位码**
-
-**webcast-mate 主路径（3.B）：**
 ```
-web QR login → secrets web_session
-  → 用户输入 6 位码
-  → GET /web_api/sns/v1/live/obs/push_url?code=XXXXXX  (xsecappid=spectrum, x-s)
+登录态（待定：须与 push_url 同源 cookie；edith 笔记扫码 ≠ 自动等于 OBS 登录）
+  → 用户输入 6 位码（或 WEBCAST_MATE_XHS_CODE）
+  → GET .../live/obs/push_url?code=
   → live.json + stdout {server,key,room_id,cookie}
 ```
-非交互：`WEBCAST_MATE_XHS_CODE=254966 webcast-mate start xiaohongshu -y`
 
-实现优先级：**3.B 网页 OBS（Web 扫码 + 手机 6 位码 → push_url）** 为主；3.A robs 短信作备用。
+非交互示例：
 
-### 3.C 状态机（3.A）
+```bash
+WEBCAST_MATE_XHS_CODE=254966 webcast-mate start xiaohongshu -y
+```
+
+#### 状态机（OBS）
 
 ```
-send_sms → login_by_sms → sid
-  → live/pre → push_url + room_id
-  → live/{id}/start
-  → 推流
-  → live/{id}/stop
+[可选登录] → 输入 6 位码 → push_url → 写 live.json → 推流
+  → 手机关播 / CLI stop 清本地
 ```
+
+#### 登录说明（开放问题）
+
+- **edith** `login/qrcode/*`（`xhs-pc-web`）：笔记/Web 常见扫码；实测可 scanned，确认后会话升级不稳定，**不默认当作 2026 开播登录定论**。
+- **redlive / customer CAS**（`omikuji` / `XYW_`）：另一套后台登录，**当前不采用**。
+- **旧 robs 短信 sid**：**明确不做**。
+- 实机以「能成功调用 `push_url?code=` 的 cookie 从哪来」为准；实现只保证 **有合法 web 会话 + 六位码 → 取 RTMP**。
 
 ---
 
 ## 4. 总表
 
-| | B 站 | 抖音 | 小红书 (robs) |
-|--|------|------|----------------|
-| **登录** | Passport 扫码 → SESSDATA+bili_jct | streamingtool 扫码 → 桌面 session | 短信 → sid |
-| **登录 Host** | passport.bilibili.com | streamingtool.douyin.com | robs.xiaohongshu.com |
-| **开播** | startLive 一次返回 rtmp | create_info→a_bogus→create→**ping LIVING** | pre→start |
-| **关播** | stopLive | ping FINISH=4 | stop |
-| **推流码形态** | addr + code 两段 | 完整 rtmp_push_url | 完整 push_url |
-| **码是否一场一变** | 是 | 是 | 是 |
-| **额外门槛** | 人脸 60024 | 桌面会话；a_bogus | 无（短信） |
-| **本仓库状态** | 协议清（油猴+扫码探活） | 登录+开播+关播已通 | 协议清（助手源码） |
+| | B 站 | 抖音 | 小红书 (OBS 6 位码) |
+|--|------|------|---------------------|
+| **登录** | Passport 扫码 → SESSDATA+bili_jct | streamingtool 扫码 → 桌面 session | 网页会话（与 spectrum/`push_url` 同源；**不做 robs 短信**） |
+| **登录 Host** | passport.bilibili.com | streamingtool.douyin.com | www / edith（OBS）；**非** robs |
+| **开播** | startLive 一次返回 rtmp | create_info→a_bogus→create→**ping LIVING** | 手机 6 位码 → `obs/push_url` |
+| **关播** | stopLive | ping FINISH=4 | 手机关播 + 清 live.json |
+| **推流码形态** | addr + code 两段 | 完整 rtmp_push_url | 完整 push_url / 固定 server+key |
+| **码是否一场一变** | 是 | 是 | 是（常换 6 位码） |
+| **额外门槛** | 人脸 60024 | 桌面会话；a_bogus | 手机预直播出码 |
+| **本仓库状态** | 协议清（油猴+扫码探活） | 登录+开播+关播已通 | OBS 取码路径；登录来源待实机钉死 |
 | **写入 conf** | server=addr, key=code | 拆 url 或整段 | server 固定 + key |
 
 ---
@@ -422,7 +359,7 @@ send_sms → login_by_sms → sid
 5. **conf 更新时机**：协议开播成功后再写 `platforms.conf`，再 `capture-router livestream start`。  
 6. **不要**为动态 URL 改 gsr；一场内地址静态。  
 7. **密钥文件权限**：session/cookie 文件 `0600`。  
-8. **错误码**：B 站 `-101` 未登录、`60024` 人脸；抖音 `4003166` 网页会话/签名、`4031` 缺 jssdk、`7`/`2156` 确认期频控；小红书 `result!=0` 看 `msg`。
+8. **错误码**：B 站 `-101` 未登录、`60024` 人脸；抖音 `4003166` 网页会话/签名、`4031` 缺 jssdk、`7`/`2156` 确认期频控；小红书 OBS `code!=0` / `-104` 无权限看 `msg`。
 
 ---
 
@@ -435,8 +372,9 @@ send_sms → login_by_sms → sid
 | B 站 `nav` 无 Cookie | code=-101 账号未登录 |
 | B 站 startLive 参数 | 与油猴一致（pc_link / area_v2 / csrf） |
 | 抖音登录+create+ping+ffmpeg | 已实机通过 |
-| 小红书 robs 路径 | 来自 XiaoHongShu_OBS + spectrum main.js |
+| 小红书 OBS `push_url` | 用户 curl / 官方 6 位码流程；`xsecappid=spectrum` |
 | 小红书 web server | `rtmp://live-push.xhscdn.com/live`（官方 OBS 文档） |
+| 小红书 robs 短信 | **不做**（旧助手协议，仅历史参考） |
 
 ---
 
@@ -446,7 +384,7 @@ send_sms → login_by_sms → sid
 |------|------|
 | B 站油猴 | `~/Code/userscripts/scripts/bilibili-live-helper.user.js` |
 | 抖音开播 | `~/douyin-live`：`pure_create.py` / `login.py`；参数表 `reference/protocol-params.md` |
-| 小红书助手（第三方） | github.com/ShigemoriHakura/XiaoHongShu_OBS |
-| 小红书 web OBS 页 | https://www.xiaohongshu.com/zhibo/robs |
+| 小红书 web OBS 页 | https://www.xiaohongshu.com/zhibo/obs |
+| 小红书旧助手复刻（参考 only，不实现） | github.com/ShigemoriHakura/XiaoHongShu_OBS |
 | 推流 conf | `~/.config/livestream/platforms.conf` |
 | gsr 推流 | `capture-router livestream start\|stop` |

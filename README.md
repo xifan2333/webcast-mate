@@ -71,9 +71,10 @@ go test ./...
 | SPEC CLI `start`/`stop` + default JSON | done |
 | Go module + CLI skeleton + conf R/W | done |
 | `bilibili` adapter | QR login + startLive/stopLive + face auth |
-| `douyin` / `xiaohongshu` | stub |
+| `xiaohongshu` | OBS 6-digit code → `push_url` (no robs SMS path) |
+| `douyin` | stub |
 
-Next: xiaohongshu → douyin (+ keepalive).
+Next: nail xhs login cookie source for OBS → douyin (+ keepalive).
 
 ### bilibili setup
 

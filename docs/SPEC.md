@@ -420,12 +420,12 @@ type Adapter interface {
 
 | 能力 | bilibili | douyin | xiaohongshu |
 |------|----------|--------|-------------|
-| 无浏览器登录 | 扫码 Passport §协议文档 | 扫码 streamingtool | 短信 robs |
-| start 拿码 | startLive | create+ping LIVING + 保活 | pre+start |
-| stop | stopLive | 停保活+ping FINISH | stop |
+| 无浏览器登录 | 扫码 Passport §协议文档 | 扫码 streamingtool | 网页会话（OBS 同源；**非 robs 短信**） |
+| start 拿码 | startLive | create+ping LIVING + 保活 | 6 位码 → `obs/push_url` |
+| stop | stopLive | 停保活+ping FINISH | 手机关播 + 清 live.json |
 | 写 conf | ✓ | ✓ | ✓ |
-| 额外交互 | 人脸 60024 扫码 | 登录确认频控 | 短信验证码 |
-| 无浏览器 start | ✓（纯 HTTP） | **待 a_bogus 方案** | ✓（纯 HTTP） |
+| 额外交互 | 人脸 60024 扫码 | 登录确认频控 | 手机预直播 6 位码 |
+| 无浏览器 start | ✓（纯 HTTP） | **待 a_bogus 方案** | 取码纯 HTTP；登录来源待钉死 |
 | 弹幕链（UniBarrage） | ✓ | ✓ | ✓（xiaohongshu） |
 
 ---
