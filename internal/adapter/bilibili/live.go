@@ -8,54 +8,7 @@ import (
 	"os"
 	"strings"
 	"time"
-
-	"github.com/xifan2333/webcast-mate/internal/session"
 )
-
-type RoomState struct {
-	RoomID   string    `json:"room_id"`
-	Server   string    `json:"server,omitempty"`
-	Key      string    `json:"key,omitempty"`
-	AreaV2   string    `json:"area_v2,omitempty"`
-	Title    string    `json:"title,omitempty"`
-	StartedAt time.Time `json:"started_at,omitempty"`
-}
-
-func roomStatePath() (string, error) {
-	d, err := session.PlatformDir("bilibili")
-	if err != nil {
-		return "", err
-	}
-	return d + "/room.json", nil
-}
-
-func LoadRoomState() (*RoomState, error) {
-	path, err := roomStatePath()
-	if err != nil {
-		return nil, err
-	}
-	var s RoomState
-	if err := session.ReadJSON(path, &s); err != nil {
-		return nil, err
-	}
-	return &s, nil
-}
-
-func SaveRoomState(s *RoomState) error {
-	path, err := roomStatePath()
-	if err != nil {
-		return err
-	}
-	return session.WriteJSON(path, s)
-}
-
-func ClearRoomState() error {
-	path, err := roomStatePath()
-	if err != nil {
-		return err
-	}
-	return session.Remove(path)
-}
 
 type apiEnvelope struct {
 	Code    int             `json:"code"`
@@ -169,7 +122,7 @@ func (c *Client) waitFaceAuth(ctx context.Context, roomID, qr, csrf string) erro
 	if qr != "" {
 		fmt.Fprintln(os.Stderr, "bilibili: face auth required — scan with bilibili app")
 		fmt.Fprintln(os.Stderr, qr)
-		printQR(qr, "face-qr.png")
+		printQR(qr)
 	} else {
 		fmt.Fprintln(os.Stderr, "bilibili: face auth required (no qr url)")
 	}

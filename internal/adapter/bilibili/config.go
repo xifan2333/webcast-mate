@@ -2,73 +2,43 @@ package bilibili
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 
-	"github.com/xifan2333/webcast-mate/internal/session"
-	"gopkg.in/yaml.v3"
+	"github.com/xifan2333/webcast-mate/internal/appcfg"
 )
 
-// Config is XDG bilibili settings.
-//
-//	~/.config/webcast-mate/bilibili/config.yaml
+// Config is the in-memory open prefs (from appcfg platforms.bilibili).
 type Config struct {
-	RoomID string `yaml:"room_id"`
-	AreaV2 string `yaml:"area_v2"`
-	Title  string `yaml:"title,omitempty"`
-	// Cover is optional: local image path or https://*.hdslb.com/... URL.
-	Cover string `yaml:"cover,omitempty"`
+	RoomID string
+	AreaV2 string
+	Title  string
+	Cover  string
 }
 
-func configPath() (string, error) {
-	d, err := session.PlatformDir("bilibili")
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(d, "config.yaml"), nil
-}
-
-// LoadConfigFile reads yaml; missing file → empty config (no error).
-func LoadConfigFile() (*Config, string, error) {
-	path, err := configPath()
-	if err != nil {
-		return nil, "", err
-	}
-	b, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return &Config{AreaV2: "21"}, path, nil
-		}
-		return nil, path, err
-	}
-	var c Config
-	if err := yaml.Unmarshal(b, &c); err != nil {
-		return nil, path, err
+func fromPlatform(p appcfg.Platform) *Config {
+	c := &Config{
+		RoomID: p.RoomID,
+		AreaV2: p.AreaV2,
+		Title:  p.Title,
+		Cover:  p.Cover,
 	}
 	if c.AreaV2 == "" {
 		c.AreaV2 = "21"
 	}
-	return &c, path, nil
+	return c
 }
 
-// SaveConfig writes config.yaml.
-func SaveConfig(c *Config) error {
-	path, err := configPath()
-	if err != nil {
-		return err
-	}
-	b, err := yaml.Marshal(c)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path, b, 0o600)
+func (c *Config) toPlatform(prev appcfg.Platform) appcfg.Platform {
+	p := prev
+	p.RoomID = c.RoomID
+	p.AreaV2 = c.AreaV2
+	p.Title = c.Title
+	p.Cover = c.Cover
+	return p
 }
 
-// ValidateForStart ensures required fields for non-interactive start.
 func (c *Config) ValidateForStart() error {
 	if c == nil || c.RoomID == "" {
-		path, _ := configPath()
-		return fmt.Errorf("%w: room_id empty (edit %s or run without -y)", ErrNotConfigured, path)
+		return fmt.Errorf("%w: room_id empty (%s)", ErrNotConfigured, appcfg.Path())
 	}
 	if c.AreaV2 == "" {
 		return fmt.Errorf("%w: area_v2 empty", ErrNotConfigured)

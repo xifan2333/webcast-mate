@@ -8,7 +8,10 @@ import (
 	"time"
 
 	"github.com/xifan2333/webcast-mate/internal/adapter"
+	"github.com/xifan2333/webcast-mate/internal/appcfg"
+	"github.com/xifan2333/webcast-mate/internal/live"
 	"github.com/xifan2333/webcast-mate/internal/platform"
+	"github.com/xifan2333/webcast-mate/internal/secrets"
 )
 
 // Adapter implements adapter.Adapter for bilibili.
@@ -23,7 +26,6 @@ func (a *Adapter) Start(ctx context.Context, opts adapter.StartOpts) (*adapter.S
 	if err != nil {
 		return nil, err
 	}
-	// Login first so area list / cover APIs can use cookies when prompting.
 	sess, err := cli.EnsureLogin(ctx)
 	if err != nil {
 		return nil, mapErr(err)
@@ -39,15 +41,19 @@ func (a *Adapter) Start(ctx context.Context, opts adapter.StartOpts) (*adapter.S
 		return nil, mapErr(err)
 	}
 
-	st := &RoomState{
-		RoomID:    cfg.RoomID,
-		Server:    server,
-		Key:       key,
-		AreaV2:    cfg.AreaV2,
-		Title:     cfg.Title,
-		StartedAt: time.Now().UTC(),
+	file, _ := appcfg.Load()
+	vbr, abr := 3200, 128
+	if file != nil {
+		vbr, abr = file.Bitrate("bilibili")
 	}
-	if err := SaveRoomState(st); err != nil {
+	if err := live.Upsert("bilibili", live.Target{
+		RoomID:       cfg.RoomID,
+		Server:       server,
+		Key:          key,
+		VideoBitrate: vbr,
+		AudioBitrate: abr,
+		StartedAt:    time.Now().UTC(),
+	}); err != nil {
 		return nil, err
 	}
 
@@ -68,20 +74,19 @@ func (a *Adapter) Stop(ctx context.Context) (*adapter.StopResult, error) {
 		Status:   "stopped",
 	}
 
-	st, err := LoadRoomState()
 	roomID := ""
-	if err == nil && st != nil {
-		roomID = st.RoomID
+	if t, ok := live.Get("bilibili"); ok {
+		roomID = t.RoomID
 	}
 	if roomID == "" {
-		if cfg, _, e := LoadConfigFile(); e == nil {
-			roomID = cfg.RoomID
+		if f, err := appcfg.Load(); err == nil {
+			roomID = f.GetPlatform("bilibili").RoomID
 		}
 	}
 	res.RoomID = roomID
 
 	if roomID == "" {
-		_ = ClearRoomState()
+		_ = live.Remove("bilibili")
 		return res, nil
 	}
 
@@ -89,17 +94,17 @@ func (a *Adapter) Stop(ctx context.Context) (*adapter.StopResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	if sess, e := LoadSession(); e == nil {
-		_ = cli.setCookieHeader(sess.Cookie)
+	if s, e := secrets.Load("bilibili"); e == nil {
+		_ = cli.setCookieHeader(s.Cookie)
 	} else {
-		_ = ClearRoomState()
+		_ = live.Remove("bilibili")
 		return res, nil
 	}
 
 	if err := cli.StopLive(roomID); err != nil {
 		fmt.Fprintf(os.Stderr, "bilibili: stop: %v\n", err)
 	}
-	_ = ClearRoomState()
+	_ = live.Remove("bilibili")
 	return res, nil
 }
 

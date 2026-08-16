@@ -1,4 +1,4 @@
-package session
+package appdir
 
 import (
 	"encoding/json"
@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 )
 
-// ReadJSON loads path into v; missing file returns os.ErrNotExist.
 func ReadJSON(path string, v any) error {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -15,7 +14,6 @@ func ReadJSON(path string, v any) error {
 	return json.Unmarshal(b, v)
 }
 
-// WriteJSON writes v to path with 0600.
 func WriteJSON(path string, v any) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
@@ -28,7 +26,6 @@ func WriteJSON(path string, v any) error {
 	return os.WriteFile(path, b, 0o600)
 }
 
-// Remove ignores not-exist.
 func Remove(path string) error {
 	err := os.Remove(path)
 	if os.IsNotExist(err) {

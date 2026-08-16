@@ -10,7 +10,7 @@ import (
 	"github.com/xifan2333/webcast-mate/internal/adapter"
 	"github.com/xifan2333/webcast-mate/internal/adapter/bilibili"
 	"github.com/xifan2333/webcast-mate/internal/adapter/stub"
-	"github.com/xifan2333/webcast-mate/internal/conf"
+	"github.com/xifan2333/webcast-mate/internal/appdir"
 	"github.com/xifan2333/webcast-mate/internal/platform"
 )
 
@@ -54,7 +54,7 @@ USAGE
   webcast-mate <command> <platform>
 
 COMMANDS
-  start <platform>   Go live: session + RTMP + write platforms.conf
+  start <platform>   Go live: session + RTMP + update live.json
   stop  <platform>   End live (idempotent)
 
   help               Show this help
@@ -82,14 +82,16 @@ EXAMPLES
   $ webcast-mate stop douyin
 
 CONFIG
-  Session/state:  $XDG_CONFIG_HOME/webcast-mate/
-  Push conf:      ~/.config/livestream/platforms.conf
-  (currently: %s)
+  $XDG_CONFIG_HOME/webcast-mate/
+    config.yaml           preferences (room, title, 分区, bitrate)
+    secrets/<platform>.json   cookies (0600)
+    live.json             active push targets for capture
+  (root: %s)
 
 STATUS
   bilibili: QR login + huh prompts (title/area/cover) + start/stop; -y skips prompts
   douyin / xiaohongshu: stub
-`, confPathDisplay())
+`, configRootDisplay())
 }
 
 func registry() *adapter.Registry {
@@ -133,12 +135,6 @@ OUTPUT
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return exitCode(err)
-	}
-	if res.Server != "" || res.Key != "" {
-		if err := writeConf(string(id), res.Server, res.Key); err != nil {
-			fmt.Fprintf(os.Stderr, "write conf: %v\n", err)
-			return 10
-		}
 	}
 	return printJSON(res)
 }
@@ -202,21 +198,6 @@ func parsePlatformArg(args []string, cmd string) (platform.ID, int) {
 	return id, 0
 }
 
-func writeConf(platformID, server, key string) error {
-	path := conf.DefaultPath()
-	f, err := conf.Load(path)
-	if err != nil {
-		return err
-	}
-	// default bitrates per SPEC
-	vbr, abr := "4000", "128"
-	if platformID == "bilibili" {
-		vbr = "3200"
-	}
-	f.UpsertServerKey(platformID, server, key, vbr, abr)
-	return f.Write(path)
-}
-
 func printJSON(v any) int {
 	// Do not HTML-escape (& → \u0026); stream keys must stay raw for conf/scripts.
 	enc := json.NewEncoder(os.Stdout)
@@ -237,12 +218,16 @@ func hasHelp(args []string) bool {
 	return false
 }
 
-func confPathDisplay() string {
-	p := conf.DefaultPath()
-	if p == "" {
-		return "$HOME/.config/livestream/platforms.conf"
+func configRootDisplay() string {
+	p, err := appdirRoot()
+	if err != nil || p == "" {
+		return "$XDG_CONFIG_HOME/webcast-mate"
 	}
 	return p
+}
+
+func appdirRoot() (string, error) {
+	return appdir.Root()
 }
 
 func exitCode(err error) int {
@@ -263,4 +248,3 @@ func exitCode(err error) int {
 		return 1
 	}
 }
-

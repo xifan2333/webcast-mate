@@ -7,25 +7,18 @@ import (
 
 	"github.com/charmbracelet/huh"
 	"github.com/xifan2333/webcast-mate/internal/adapter"
+	"github.com/xifan2333/webcast-mate/internal/appcfg"
 )
 
-// ResolveConfig loads saved config, then either uses it (-y) or runs huh prompts.
-//
-// Form UX matches “npm init”: one page, all fields visible.
-//
-// huh Select notes (from docs + source):
-//   - Title() is the label above the list
-//   - Height(n) sizes the field; viewport gets n minus title/desc lines
-//   - Filtering(true) *enters* filter mode immediately and *replaces* Title
-//     with the search box — never use it if you want a visible Title
-//   - Prefer a moderate Height so the group does not clamp a 400-line list
-//     to the terminal height and crop the top
+// ResolveConfig loads appcfg platforms.bilibili, then prompts or uses -y.
 func ResolveConfig(ctx context.Context, cli *Client, opts adapter.StartOpts) (*Config, error) {
 	_ = ctx
-	cfg, path, err := LoadConfigFile()
+	_ = appcfg.EnsureExists()
+	file, err := appcfg.Load()
 	if err != nil {
 		return nil, err
 	}
+	cfg := fromPlatform(file.GetPlatform("bilibili"))
 
 	if opts.Yes {
 		if err := cfg.ValidateForStart(); err != nil {
@@ -40,8 +33,6 @@ func ResolveConfig(ctx context.Context, cli *Client, opts adapter.StartOpts) (*C
 		}
 		return cfg, nil
 	}
-
-	_ = path
 
 	var areaOptions []huh.Option[string]
 	if areas, err := cli.ListAreas(); err == nil && len(areas) > 0 {
@@ -62,6 +53,7 @@ func ResolveConfig(ctx context.Context, cli *Client, opts adapter.StartOpts) (*C
 		areaV2 = "21"
 	}
 
+	// One page. No Filtering(true) (hides Title). Height(10) for options only.
 	fields := []huh.Field{
 		huh.NewInput().
 			Title("直播间号").
@@ -78,16 +70,12 @@ func ResolveConfig(ctx context.Context, cli *Client, opts adapter.StartOpts) (*C
 			Description("留空则不修改当前标题").
 			Value(&title),
 	}
-
 	if len(areaOptions) > 0 {
 		fields = append(fields, huh.NewSelect[string]().
 			Title("分区").
 			Description("本次直播所属分区").
 			Options(areaOptions...).
 			Value(&areaV2).
-			// Options list ~8 rows; title+description stay above (huh docs).
-			// Do not call Filtering(true): that starts filter mode and hides Title.
-			// Press "/" later if you need to search (default keymap).
 			Height(10))
 	} else {
 		fields = append(fields, huh.NewInput().
@@ -101,28 +89,22 @@ func ResolveConfig(ctx context.Context, cli *Client, opts adapter.StartOpts) (*C
 				return nil
 			}))
 	}
-
 	fields = append(fields, huh.NewInput().
 		Title("封面").
 		Description("已有封面图链接（可选，留空跳过）").
 		Value(&cover))
 
-	// Single group = one page, all fields together (original layout).
 	form := huh.NewForm(huh.NewGroup(fields...)).WithTheme(huh.ThemeCharm())
 	if err := form.Run(); err != nil {
 		return nil, err
 	}
 
-	out := &Config{
-		RoomID: roomID,
-		AreaV2: areaV2,
-		Title:  title,
-		Cover:  cover,
-	}
+	out := &Config{RoomID: roomID, AreaV2: areaV2, Title: title, Cover: cover}
 	if err := out.ValidateForStart(); err != nil {
 		return nil, err
 	}
-	if err := SaveConfig(out); err != nil {
+	prev := file.GetPlatform("bilibili")
+	if err := file.SetPlatform("bilibili", out.toPlatform(prev)); err != nil {
 		fmt.Fprintf(os.Stderr, "bilibili: warn save config: %v\n", err)
 	}
 	return out, nil

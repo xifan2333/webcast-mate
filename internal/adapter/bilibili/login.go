@@ -9,46 +9,37 @@ import (
 	"time"
 
 	qrcode "github.com/skip2/go-qrcode"
-	"github.com/xifan2333/webcast-mate/internal/session"
+	"github.com/xifan2333/webcast-mate/internal/secrets"
 	"github.com/xifan2333/webcast-mate/internal/termimg"
 )
 
-type Session struct {
-	Cookie    string    `json:"cookie"`
-	LoginAt   time.Time `json:"login_at"`
-	UserID    string    `json:"user_id,omitempty"`
-	UserName  string    `json:"user_name,omitempty"`
+// EnsureLogin loads secrets or runs QR login (stderr progress).
+func (c *Client) EnsureLogin(ctx context.Context) (*secrets.File, error) {
+	if s, err := secrets.Load("bilibili"); err == nil {
+		if err := c.setCookieHeader(s.Cookie); err != nil {
+			return nil, err
+		}
+		if ok, uid, name := c.checkNav(ctx); ok {
+			s.UserID = uid
+			s.UserName = name
+			return s, nil
+		}
+		fmt.Fprintln(os.Stderr, "bilibili: saved session invalid, re-login")
+	}
+	return c.loginQR(ctx)
 }
 
-func sessionPath() (string, error) {
-	d, err := session.PlatformDir("bilibili")
+func (c *Client) checkNav(ctx context.Context) (ok bool, uid, name string) {
+	_ = ctx
+	b, err := c.doJSON("GET", urlNav, nil, nil)
 	if err != nil {
-		return "", err
+		return false, "", ""
 	}
-	return d + "/session.json", nil
-}
-
-func LoadSession() (*Session, error) {
-	path, err := sessionPath()
-	if err != nil {
-		return nil, err
+	var nav navResp
+	if json.Unmarshal(b, &nav) != nil || nav.Code != 0 || !nav.Data.IsLogin {
+		return false, "", ""
 	}
-	var s Session
-	if err := session.ReadJSON(path, &s); err != nil {
-		return nil, err
-	}
-	if s.Cookie == "" {
-		return nil, ErrNotLoggedIn
-	}
-	return &s, nil
-}
-
-func SaveSession(s *Session) error {
-	path, err := sessionPath()
-	if err != nil {
-		return err
-	}
-	return session.WriteJSON(path, s)
+	return true, fmt.Sprintf("%d", nav.Data.Mid), nav.Data.Uname
 }
 
 type qrGenResp struct {
@@ -80,36 +71,7 @@ type navResp struct {
 	} `json:"data"`
 }
 
-// EnsureLogin loads session or runs QR login (stderr progress).
-func (c *Client) EnsureLogin(ctx context.Context) (*Session, error) {
-	if s, err := LoadSession(); err == nil {
-		if err := c.setCookieHeader(s.Cookie); err != nil {
-			return nil, err
-		}
-		if ok, uid, name := c.checkNav(ctx); ok {
-			s.UserID = uid
-			s.UserName = name
-			return s, nil
-		}
-		fmt.Fprintln(os.Stderr, "bilibili: saved session invalid, re-login")
-	}
-	return c.loginQR(ctx)
-}
-
-func (c *Client) checkNav(ctx context.Context) (ok bool, uid, name string) {
-	_ = ctx
-	b, err := c.doJSON("GET", urlNav, nil, nil)
-	if err != nil {
-		return false, "", ""
-	}
-	var nav navResp
-	if json.Unmarshal(b, &nav) != nil || nav.Code != 0 || !nav.Data.IsLogin {
-		return false, "", ""
-	}
-	return true, fmt.Sprintf("%d", nav.Data.Mid), nav.Data.Uname
-}
-
-func (c *Client) loginQR(ctx context.Context) (*Session, error) {
+func (c *Client) loginQR(ctx context.Context) (*secrets.File, error) {
 	b, err := c.doJSON("GET", urlQRGenerate, nil, map[string]string{
 		"Referer": "https://passport.bilibili.com/login",
 		"Origin":  "https://passport.bilibili.com",
@@ -127,7 +89,7 @@ func (c *Client) loginQR(ctx context.Context) (*Session, error) {
 
 	fmt.Fprintln(os.Stderr, "bilibili: scan QR with bilibili app")
 	fmt.Fprintln(os.Stderr, gen.Data.URL)
-	printQR(gen.Data.URL, "login-qr.png")
+	printQR(gen.Data.URL)
 
 	deadline := time.Now().Add(3 * time.Minute)
 	for {
@@ -151,10 +113,8 @@ func (c *Client) loginQR(ctx context.Context) (*Session, error) {
 			time.Sleep(2 * time.Second)
 			continue
 		}
-		// outer code should be 0; inner data.code is status
 		switch poll.Data.Code {
 		case 0:
-			// success — cookies in jar
 			ck := c.cookieString()
 			if ck == "" || c.csrf() == "" {
 				return nil, fmt.Errorf("login ok but missing SESSDATA/bili_jct")
@@ -163,25 +123,22 @@ func (c *Client) loginQR(ctx context.Context) (*Session, error) {
 			if !ok {
 				return nil, fmt.Errorf("login ok but nav not logged in")
 			}
-			s := &Session{
+			s := &secrets.File{
 				Cookie:   ck,
 				LoginAt:  time.Now().UTC(),
 				UserID:   uid,
 				UserName: name,
 			}
-			if err := SaveSession(s); err != nil {
+			if err := secrets.Save("bilibili", s); err != nil {
 				return nil, err
 			}
 			fmt.Fprintf(os.Stderr, "bilibili: logged in as %s (%s)\n", name, uid)
 			return s, nil
 		case 86101:
-			// waiting scan
 		case 86090:
 			fmt.Fprintln(os.Stderr, "bilibili: scanned, confirm on phone")
 		case 86038:
 			return nil, ErrQRExpired
-		default:
-			// keep polling unknown
 		}
 		select {
 		case <-ctx.Done():
@@ -191,10 +148,7 @@ func (c *Client) loginQR(ctx context.Context) (*Session, error) {
 	}
 }
 
-// printQR shows a scannable QR on stderr.
-// Prefer Kitty graphics protocol (true PNG pixels) when supported; else character art.
-func printQR(content, filename string) {
-	_ = filename
+func printQR(content string) {
 	if content == "" {
 		return
 	}
@@ -203,7 +157,6 @@ func printQR(content, filename string) {
 		fmt.Fprintf(os.Stderr, "bilibili: qr: %v\n", err)
 		return
 	}
-	// quiet zone helps phone cameras; keep library default border
 	if termimg.SupportsKitty() {
 		png, err := q.PNG(280)
 		if err == nil && termimg.WriteKittyPNG(os.Stderr, png) == nil {

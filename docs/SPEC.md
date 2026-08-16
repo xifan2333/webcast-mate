@@ -45,7 +45,7 @@
 ```text
                    ┌─ 画面链 ──────────────────────────────┐
 webcast-mate       │ start 写 server/key                    │
-  start <platform> ┤→ ~/.config/livestream/platforms.conf   │
+  start <platform> ┤→ ~/.config/webcast-mate/live.json   │
   (会话+开播+码) ──┤→ capture-router livestream start        │
                    ┤→ gpu-screen-recorder -o <url>          │
          │         └───────────────────────────────────────┘
@@ -164,10 +164,10 @@ dmnotifier --ws ws://127.0.0.1:7777 \
 ```
 webcast-mate                          已有栈（arch-post-install）
 ────────────                          ────────────────────────
-start / stop                          platforms.conf
+start / stop                          live.json
         │                                    │
         │  start 成功后写入                    │
-        └─────► ~/.config/livestream/platforms.conf
+        └─────► ~/.config/webcast-mate/live.json
                                              │
                                              ▼
                                   capture-router livestream start
@@ -176,7 +176,7 @@ start / stop                          platforms.conf
                                   gpu-screen-recorder -c flv -o <url>
 ```
 
-### 4.1 `platforms.conf` 段约定（静态，兼容现网）
+### 4.1 `live.json` 段约定（静态，兼容现网）
 
 ```ini
 [bilibili]   # 段名 = platform id（小写英文）
@@ -462,7 +462,7 @@ type Adapter interface {
 | [SPEC.md](./SPEC.md) | 本文件：产品边界、管道协作、CLI、Adapter、conf、无浏览器 |
 | [protocol-platforms.md](./protocol-platforms.md) | 三平台 HTTP 级协议与状态机 |
 | `~/douyin-live` | 抖音 Python 对照（可含 Chromium 签名，**非**规范主路径） |
-| `~/.config/livestream/platforms.conf` | 推流侧 conf（本工具的写入目标） |
+| `~/.config/webcast-mate/live.json` | 推流侧 conf（本工具的写入目标） |
 | `capture-router` | 推流启停（本工具默认不替代） |
 | `unibarrage` | 弹幕采集转发（API :8080 / WS :7777），管道弹幕链消费本工具 session+room |
 | `dmnotifier` | `start/stop/list` + TUI；消费 UniBarrage WS |
