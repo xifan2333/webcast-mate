@@ -6,42 +6,39 @@ import (
 	"github.com/xifan2333/webcast-mate/internal/appcfg"
 )
 
-// Config is the in-memory open prefs (from appcfg platforms.bilibili).
-type Config struct {
+// OpenConfig is start-time prefs for bilibili (same name as other adapters).
+type OpenConfig struct {
 	RoomID string
-	AreaV2 string
+	Area   string
 	Title  string
-	Cover  string
 }
 
-func fromPlatform(p appcfg.Platform) *Config {
-	c := &Config{
+func fromPlatform(p appcfg.Platform) *OpenConfig {
+	c := &OpenConfig{
 		RoomID: p.RoomID,
-		AreaV2: p.AreaV2,
+		Area:   p.Area,
 		Title:  p.Title,
-		Cover:  p.Cover,
 	}
-	if c.AreaV2 == "" {
-		c.AreaV2 = "21"
+	if c.Area == "" {
+		c.Area = "21"
 	}
 	return c
 }
 
-func (c *Config) toPlatform(prev appcfg.Platform) appcfg.Platform {
+func (c *OpenConfig) toPlatform(prev appcfg.Platform) appcfg.Platform {
 	p := prev
 	p.RoomID = c.RoomID
-	p.AreaV2 = c.AreaV2
+	p.Area = c.Area
 	p.Title = c.Title
-	p.Cover = c.Cover
 	return p
 }
 
-func (c *Config) ValidateForStart() error {
+func (c *OpenConfig) ValidateForStart() error {
 	if c == nil || c.RoomID == "" {
 		return fmt.Errorf("%w: room_id empty (%s)", ErrNotConfigured, appcfg.Path())
 	}
-	if c.AreaV2 == "" {
-		return fmt.Errorf("%w: area_v2 empty", ErrNotConfigured)
+	if c.Area == "" {
+		return fmt.Errorf("%w: area empty", ErrNotConfigured)
 	}
 	return nil
 }

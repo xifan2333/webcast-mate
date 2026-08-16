@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
-	"os"
-	"strings"
 	"time"
 )
 
@@ -58,39 +56,6 @@ func (c *Client) updateRoom(roomID, title, areaID, csrf string) error {
 	return nil
 }
 
-// updateCover sets cover via UpdatePreLiveInfo (URL must be on *.hdslb.com).
-func (c *Client) updateCover(coverURL, csrf string) error {
-	if coverURL == "" {
-		return nil
-	}
-	form := url.Values{}
-	form.Set("platform", "web")
-	form.Set("mobi_app", "web")
-	form.Set("build", "1")
-	form.Set("cover", coverURL)
-	form.Set("coverVertical", "")
-	form.Set("liveDirectionType", "1")
-	form.Set("visit_id", "")
-	form.Set("csrf_token", csrf)
-	form.Set("csrf", csrf)
-	b, err := c.doJSON("POST", urlUpdatePreLive, form, nil)
-	if err != nil {
-		return err
-	}
-	var env apiEnvelope
-	if err := json.Unmarshal(b, &env); err != nil {
-		return err
-	}
-	if env.Code != 0 {
-		msg := env.Message
-		if msg == "" {
-			msg = env.Msg
-		}
-		return fmt.Errorf("update cover: %s (%d)", msg, env.Code)
-	}
-	return nil
-}
-
 func (c *Client) startLiveOnce(roomID, areaV2, csrf string) (*startLiveData, int, string, error) {
 	form := url.Values{}
 	form.Set("room_id", roomID)
@@ -120,11 +85,8 @@ func (c *Client) startLiveOnce(roomID, areaV2, csrf string) (*startLiveData, int
 
 func (c *Client) waitFaceAuth(ctx context.Context, roomID, qr, csrf string) error {
 	if qr != "" {
-		fmt.Fprintln(os.Stderr, "bilibili: face auth required — scan with bilibili app")
-		fmt.Fprintln(os.Stderr, qr)
-		printQR(qr)
-	} else {
-		fmt.Fprintln(os.Stderr, "bilibili: face auth required (no qr url)")
+		close := printQR(qr)
+		defer close()
 	}
 	form := url.Values{}
 	form.Set("room_id", roomID)
@@ -149,7 +111,6 @@ func (c *Client) waitFaceAuth(ctx context.Context, roomID, qr, csrf string) erro
 					IsIdentified bool `json:"is_identified"`
 				}
 				if json.Unmarshal(env.Data, &data) == nil && data.IsIdentified {
-					fmt.Fprintln(os.Stderr, "bilibili: face auth ok")
 					return nil
 				}
 			}
@@ -162,23 +123,18 @@ func (c *Client) waitFaceAuth(ctx context.Context, roomID, qr, csrf string) erro
 	}
 }
 
-// StartLive applies title/area/cover then startLive (+ face auth retry).
-func (c *Client) StartLive(ctx context.Context, cfg *Config) (server, key string, err error) {
+// StartLive applies title/area then startLive (+ face auth retry).
+// Cover is not set from CLI; platform keeps the existing room cover.
+func (c *Client) StartLive(ctx context.Context, cfg *OpenConfig) (server, key string, err error) {
 	csrf := c.csrf()
 	if csrf == "" {
 		return "", "", ErrNotLoggedIn
 	}
-	if err := c.updateRoom(cfg.RoomID, cfg.Title, cfg.AreaV2, csrf); err != nil {
+	if err := c.updateRoom(cfg.RoomID, cfg.Title, cfg.Area, csrf); err != nil {
 		return "", "", err
 	}
-	if cover := strings.TrimSpace(cfg.Cover); cover != "" {
-		if err := c.applyCover(cover, csrf); err != nil {
-			// cover optional — warn but continue open
-			fmt.Fprintf(os.Stderr, "bilibili: cover: %v\n", err)
-		}
-	}
 
-	data, code, msg, err := c.startLiveOnce(cfg.RoomID, cfg.AreaV2, csrf)
+	data, code, msg, err := c.startLiveOnce(cfg.RoomID, cfg.Area, csrf)
 	if err != nil {
 		return "", "", err
 	}
@@ -186,7 +142,7 @@ func (c *Client) StartLive(ctx context.Context, cfg *Config) (server, key string
 		if err := c.waitFaceAuth(ctx, cfg.RoomID, data.QR, csrf); err != nil {
 			return "", "", err
 		}
-		data, code, msg, err = c.startLiveOnce(cfg.RoomID, cfg.AreaV2, csrf)
+		data, code, msg, err = c.startLiveOnce(cfg.RoomID, cfg.Area, csrf)
 		if err != nil {
 			return "", "", err
 		}
@@ -198,22 +154,6 @@ func (c *Client) StartLive(ctx context.Context, cfg *Config) (server, key string
 		return "", "", fmt.Errorf("startLive: empty rtmp")
 	}
 	return data.RTMP.Addr, data.RTMP.Code, nil
-}
-
-// applyCover sets cover URL via UpdatePreLiveInfo.
-// Local file upload is not implemented yet; only https://*.hdslb.com/… URLs work.
-func (c *Client) applyCover(cover, csrf string) error {
-	if strings.HasPrefix(cover, "http://") || strings.HasPrefix(cover, "https://") {
-		if !strings.Contains(cover, "hdslb.com") {
-			return fmt.Errorf("cover URL must be on *.hdslb.com (got %s)", cover)
-		}
-		return c.updateCover(cover, csrf)
-	}
-	// local path — not yet: needs BFS upload token flow
-	if _, err := os.Stat(cover); err == nil {
-		return fmt.Errorf("local cover upload not implemented yet; use an existing hdslb.com URL or leave empty")
-	}
-	return fmt.Errorf("invalid cover %q", cover)
 }
 
 // StopLive ends the stream.
@@ -247,6 +187,54 @@ func (c *Client) StopLive(roomID string) error {
 		return fmt.Errorf("stopLive: %s (%d)", msg, env.Code)
 	}
 	return nil
+}
+
+type BlinkRoomInfo struct {
+	RoomID, UID, Title, AreaV2ID, AreaV2Name, ParentID, ParentName, Face string
+	LiveStatus                                                           int
+}
+
+func (c *Client) GetBlinkRoomInfo() (*BlinkRoomInfo, error) {
+	b, err := c.doJSON("GET", urlBlinkGetInfo, nil, map[string]string{
+		"Origin": "https://link.bilibili.com", "Referer": "https://link.bilibili.com/p/center/index",
+		"Accept": "application/json, text/plain, */*",
+	})
+	if err != nil {
+		return nil, err
+	}
+	var env apiEnvelope
+	if err := json.Unmarshal(b, &env); err != nil {
+		return nil, err
+	}
+	if env.Code != 0 {
+		msg := env.Message
+		if msg == "" {
+			msg = env.Msg
+		}
+		return nil, fmt.Errorf("blink GetInfo: %s (%d)", msg, env.Code)
+	}
+	var data struct {
+		RoomID     any    `json:"room_id"`
+		UID        any    `json:"uid"`
+		Title      string `json:"title"`
+		AreaV2ID   any    `json:"area_v2_id"`
+		AreaV2Name string `json:"area_v2_name"`
+		ParentID   any    `json:"parent_id"`
+		ParentName string `json:"parent_name"`
+		LiveStatus int    `json:"live_status"`
+		Face       string `json:"face"`
+	}
+	if err := json.Unmarshal(env.Data, &data); err != nil {
+		return nil, err
+	}
+	rid := anyToString(data.RoomID)
+	if rid == "" {
+		return nil, fmt.Errorf("blink GetInfo: empty room_id")
+	}
+	return &BlinkRoomInfo{RoomID: rid, UID: anyToString(data.UID), Title: data.Title,
+		AreaV2ID: anyToString(data.AreaV2ID), AreaV2Name: data.AreaV2Name,
+		ParentID: anyToString(data.ParentID), ParentName: data.ParentName,
+		LiveStatus: data.LiveStatus, Face: data.Face}, nil
 }
 
 // RoomLiveInfo is a remote room snapshot from get_info.

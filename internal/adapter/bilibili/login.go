@@ -5,18 +5,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
-	"os"
 	"time"
 
-	qrcode "github.com/skip2/go-qrcode"
+	"github.com/xifan2333/webcast-mate/internal/platform"
 	"github.com/xifan2333/webcast-mate/internal/secrets"
 	"github.com/xifan2333/webcast-mate/internal/termimg"
 )
 
 // EnsureLogin loads secrets or runs QR login (stderr progress).
 func (c *Client) EnsureLogin(ctx context.Context) (*secrets.File, error) {
-	if s, err := secrets.Load("bilibili"); err == nil {
-		if err := c.setCookieHeader(s.Cookie); err != nil {
+	if s, err := secrets.Load(platform.Bilibili); err == nil {
+		if err := c.ApplySecrets(s); err != nil {
 			return nil, err
 		}
 		if ok, uid, name := c.checkNav(ctx); ok {
@@ -24,7 +23,6 @@ func (c *Client) EnsureLogin(ctx context.Context) (*secrets.File, error) {
 			s.UserName = name
 			return s, nil
 		}
-		fmt.Fprintln(os.Stderr, "bilibili: saved session invalid, re-login")
 	}
 	return c.loginQR(ctx)
 }
@@ -87,9 +85,8 @@ func (c *Client) loginQR(ctx context.Context) (*secrets.File, error) {
 		return nil, fmt.Errorf("qr generate: code=%d %s", gen.Code, gen.Message)
 	}
 
-	fmt.Fprintln(os.Stderr, "bilibili: scan QR with bilibili app")
-	fmt.Fprintln(os.Stderr, gen.Data.URL)
-	printQR(gen.Data.URL)
+	close := printQR(gen.Data.URL)
+	defer close()
 
 	deadline := time.Now().Add(3 * time.Minute)
 	for {
@@ -123,20 +120,13 @@ func (c *Client) loginQR(ctx context.Context) (*secrets.File, error) {
 			if !ok {
 				return nil, fmt.Errorf("login ok but nav not logged in")
 			}
-			s := &secrets.File{
-				Cookie:   ck,
-				LoginAt:  time.Now().UTC(),
-				UserID:   uid,
-				UserName: name,
-			}
-			if err := secrets.Save("bilibili", s); err != nil {
+			s := c.ExportSecrets(uid, name, time.Now().UTC())
+			if err := secrets.Save(platform.Bilibili, s); err != nil {
 				return nil, err
 			}
-			fmt.Fprintf(os.Stderr, "bilibili: logged in as %s (%s)\n", name, uid)
 			return s, nil
 		case 86101:
 		case 86090:
-			fmt.Fprintln(os.Stderr, "bilibili: scanned, confirm on phone")
 		case 86038:
 			return nil, ErrQRExpired
 		}
@@ -148,20 +138,6 @@ func (c *Client) loginQR(ctx context.Context) (*secrets.File, error) {
 	}
 }
 
-func printQR(content string) {
-	if content == "" {
-		return
-	}
-	q, err := qrcode.New(content, qrcode.Medium)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "bilibili: qr: %v\n", err)
-		return
-	}
-	if termimg.SupportsKitty() {
-		png, err := q.PNG(280)
-		if err == nil && termimg.WriteKittyPNG(os.Stderr, png) == nil {
-			return
-		}
-	}
-	fmt.Fprint(os.Stderr, q.ToSmallString(false))
+func printQR(content string) func() {
+	return termimg.ShowQR(nil, content)
 }

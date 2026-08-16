@@ -8,20 +8,23 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/xifan2333/webcast-mate/internal/adapter"
+	"github.com/xifan2333/webcast-mate/internal/secrets"
 )
 
 const (
 	ua = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
 
-	urlQRGenerate    = "https://passport.bilibili.com/x/passport-login/web/qrcode/generate"
-	urlQRPoll        = "https://passport.bilibili.com/x/passport-login/web/qrcode/poll"
-	urlNav           = "https://api.bilibili.com/x/web-interface/nav"
-	urlStartLive     = "https://api.live.bilibili.com/room/v1/Room/startLive"
-	urlStopLive      = "https://api.live.bilibili.com/room/v1/Room/stopLive"
-	urlUpdateRoom    = "https://api.live.bilibili.com/room/v1/Room/update"
-	urlUpdatePreLive = "https://api.live.bilibili.com/xlive/app-blink/v1/preLive/UpdatePreLiveInfo"
-	urlFaceAuth      = "https://api.live.bilibili.com/xlive/app-blink/v1/preLive/IsUserIdentifiedByFaceAuth"
-	urlRoomInfo      = "https://api.live.bilibili.com/room/v1/Room/get_info"
+	urlQRGenerate   = "https://passport.bilibili.com/x/passport-login/web/qrcode/generate"
+	urlQRPoll       = "https://passport.bilibili.com/x/passport-login/web/qrcode/poll"
+	urlNav          = "https://api.bilibili.com/x/web-interface/nav"
+	urlStartLive    = "https://api.live.bilibili.com/room/v1/Room/startLive"
+	urlStopLive     = "https://api.live.bilibili.com/room/v1/Room/stopLive"
+	urlUpdateRoom   = "https://api.live.bilibili.com/room/v1/Room/update"
+	urlFaceAuth     = "https://api.live.bilibili.com/xlive/app-blink/v1/preLive/IsUserIdentifiedByFaceAuth"
+	urlRoomInfo     = "https://api.live.bilibili.com/room/v1/Room/get_info"
+	urlBlinkGetInfo = "https://api.live.bilibili.com/xlive/app-blink/v1/room/GetInfo?platform=pc"
 )
 
 type Client struct {
@@ -41,6 +44,21 @@ func NewClient() (*Client, error) {
 			Jar:     jar,
 		},
 	}, nil
+}
+
+func (c *Client) ApplySecrets(f *secrets.File) error {
+	if f == nil {
+		return nil
+	}
+	f.Normalize()
+	return c.setCookieHeader(f.CookieHeader())
+}
+
+func (c *Client) ExportSecrets(userID, userName string, loginAt time.Time) *secrets.File {
+	f := &secrets.File{Version: secrets.Version, UserID: userID, UserName: userName, LoginAt: loginAt,
+		Cookies: secrets.ParseCookieHeader(c.cookieString()), Headers: map[string]string{}, Params: map[string]string{}}
+	f.Normalize()
+	return f
 }
 
 func (c *Client) setCookieHeader(raw string) error {
@@ -148,7 +166,7 @@ func (c *Client) doJSON(method, rawURL string, form url.Values, headers map[stri
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %v", adapter.ErrNetwork, err)
 	}
 	defer resp.Body.Close()
 	b, err := io.ReadAll(resp.Body)
@@ -156,7 +174,7 @@ func (c *Client) doJSON(method, rawURL string, form url.Values, headers map[stri
 		return nil, err
 	}
 	if resp.StatusCode >= 400 {
-		return b, fmt.Errorf("http %d", resp.StatusCode)
+		return b, fmt.Errorf("%w: http %d", adapter.ErrNetwork, resp.StatusCode)
 	}
 	return b, nil
 }
