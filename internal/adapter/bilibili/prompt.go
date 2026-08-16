@@ -52,11 +52,12 @@ func ResolveConfig(ctx context.Context, cli *Client, opts adapter.StartOpts) (*C
 		areaV2 = "21"
 	}
 
-	// Split into groups so each step shows a clear heading.
-	// For 分区: huh Select.Height crops Title inside the field — use a Note
-	// as the only title, and leave Select without Height.
-	gBasic := huh.NewGroup(
-		huh.NewNote().Title("开播设置"),
+	// One field per group so the focused field's Title is always on screen.
+	// Important: do NOT call Select.Filtering(true) — that *starts* filter mode
+	// and replaces Title with the filter input. Filtering is still available
+	// with "/" when needed (huh default keymap).
+	// Do NOT set Select.Height either — it crops Title via lipgloss Height.
+	gRoom := huh.NewGroup(
 		huh.NewInput().
 			Title("直播间号").
 			Description("直播姬 / 直播中心显示的房间号（不是短号）").
@@ -67,6 +68,8 @@ func ResolveConfig(ctx context.Context, cli *Client, opts adapter.StartOpts) (*C
 				}
 				return nil
 			}),
+	)
+	gTitle := huh.NewGroup(
 		huh.NewInput().
 			Title("标题").
 			Description("留空则不修改当前标题").
@@ -76,12 +79,11 @@ func ResolveConfig(ctx context.Context, cli *Client, opts adapter.StartOpts) (*C
 	var gArea *huh.Group
 	if len(areaOptions) > 0 {
 		gArea = huh.NewGroup(
-			huh.NewNote().Title("分区"),
 			huh.NewSelect[string]().
-				Description("选择本次直播所属分区").
+				Title("分区").
+				Description("本次直播所属分区").
 				Options(areaOptions...).
-				Value(&areaV2).
-				Filtering(true),
+				Value(&areaV2),
 		)
 	} else {
 		gArea = huh.NewGroup(
@@ -105,7 +107,7 @@ func ResolveConfig(ctx context.Context, cli *Client, opts adapter.StartOpts) (*C
 			Value(&cover),
 	)
 
-	form := huh.NewForm(gBasic, gArea, gCover).WithTheme(huh.ThemeCharm())
+	form := huh.NewForm(gRoom, gTitle, gArea, gCover).WithTheme(huh.ThemeCharm())
 	if err := form.Run(); err != nil {
 		return nil, err
 	}
