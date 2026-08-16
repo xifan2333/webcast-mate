@@ -3,7 +3,7 @@
 > 状态：**规范阶段**（无实现要求）。  
 > 实现语言倾向：**Go**（跨平台单文件、标准库 HTTP；性能对协议 CLI 足够）。  
 > 协议细节：[`protocol-platforms.md`](./protocol-platforms.md)。  
-> 抖音对照实现（Python，可依赖 Chromium 签 a_bogus）：`~/douyin-live`（只读参考）。
+> 抖音伴侣真链路：[protocol-douyin-companion.md](./protocol-douyin-companion.md)。抓包工具可放 `~/douyin-live`（仅 mitm，非运行时）。
 
 ---
 
@@ -469,7 +469,7 @@ type Adapter interface {
 |------|------|
 | [SPEC.md](./SPEC.md) | 本文件：产品边界、管道协作、CLI、Adapter、conf、无浏览器 |
 | [protocol-platforms.md](./protocol-platforms.md) | 三平台 HTTP 级协议与状态机 |
-| `~/douyin-live` | 抖音 Python 对照（可含 Chromium 签名，**非**规范主路径） |
+| `~/douyin-live` | 可选 mitm 全量抓包工作区；协议以 `protocol-douyin-companion.md` 为准 |
 | `~/.config/webcast-mate/live.json` | 推流侧 conf（本工具的写入目标） |
 | `capture-router` | 推流启停（本工具默认不替代） |
 | `unibarrage` | 弹幕采集转发（API :8080 / WS :7777），管道弹幕链消费本工具 session+room |

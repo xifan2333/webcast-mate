@@ -177,84 +177,24 @@ room_id={room_id}&platform=pc_link&csrf_token={bili_jct}&csrf={bili_jct}
 
 ## 2. 抖音 webcast_mate（aid=2079）
 
-详见 `~/douyin-live/reference/protocol-params.md` 与本仓库 [SPEC.md](./SPEC.md)；此处只列登录+开播要点。
+**完整真链路（伴侣 12.7.3 全量抓包 + 静态 JS）见：[protocol-douyin-companion.md](./protocol-douyin-companion.md)。**
 
-### 2.1 登录（已实现 `login.py`，纯协议）
+摘要：
 
-| 步骤 | 接口 |
-|------|------|
-| ttwid | `POST https://streamingtool.douyin.com/ttwid/check/` → 不够再 `/ttwid/register/` |
-| 出码 | `GET https://streamingtool.douyin.com/passport/web/get_qrcode/` |
-| 轮询 | `POST …/passport/web/check_qrconnect/` |
-
-出码 query 必须带 jssdk，否则 **4031 版本过低**：
+| 段 | Host | app_name | 要点 |
+|----|------|----------|------|
+| 登录 | `streamingtool.douyin.com` | **`aweme_live_assistant`** | get/check 大 query + **每请求 a_bogus**；`did`/`iid`；check `is_frontier=true`；**confirmed 的 Set-Cookie = 桌面 session** |
+| 开播/关播 | **`webcast.amemv.com`** | `webcast_mate` | `create_info` → `pre_schedule_key` → `room/create` → **`ping status=2`** → 关播 **`ping status=4`** |
 
 ```
-passport_jssdk_version=2.4.13
-passport_jssdk_type=normal
-is_from_ttaccountsdk=1
-aid=2079
-language=zh
-is_from_iesaccountsaas=1
-account_sdk_source=web
-next=https://streamingtool.douyin.com
-need_logo=false&need_short_url=false&is_new_login=1
+ttwid → get_qrcode → check_qrconnect(new/scanned/confirmed)
+  → create_info → room/create (PREPARE=1, rtmp)
+  → ping LIVING=2 → 推流
+  → ping FINISH=4 →（可选）anchor_finish_info
 ```
 
-Header：`x-tt-passport-csrf-token`（首次 get_qrcode 会 Set-Cookie `passport_csrf_token`）。
-
-**check 状态：** `new/1 → scanned/2 → confirmed/3`；`refused/4`、`expired/5` 重新出码。  
-可重试错误：`2156` 系统繁忙、`7` 访问太频繁（确认后放慢轮询）。
-
-成功 Cookie（桌面会话，网页 session 开播会 4003166）：
-
-`sessionid, sessionid_ss, sid_tt, sid_guard, sid_ucp_v1, ssid_ucp_v1, uid_tt, odin_tt, passport_assist_user, passport_csrf_token, ttwid, …`
-
-### 2.2 开播
-
-| 步骤 | 接口 | 说明 |
-|------|------|------|
-| ① | `POST webcast-pc.amemv.com/webcast/room/create_info/` | → `preschedule_key` + `cover.uri` |
-| ② | bdms 1.0.1.20 签 **完整 create body** | → `a_bogus`（Chromium+CDP，~184–188 字符） |
-| ③ | `POST webcast-pc…/webcast/room/create/?…&a_bogus=` | body 23 参数 |
-| ④ | `POST webcast.amemv.com/webcast/room/ping/anchor/` | **`status=2` LIVING** ← 缺这步观众看不到 |
-
-`ROOM_STATUS = {PREPARE:1, LIVING:2, PAUSE:3, FINISH:4}`
-
-create 成功 → `data.stream_url.rtmp_push_url`（完整 URL，一场内不变）。  
-可拆 conf，或 gsr `-o` 直接吃完整 URL：
-
-```ini
-[douyin]
-server = rtmp://push-rtmp-….douyincdn.com/third
-key    = stream-xxx?…&sign=…&pri=…
-```
-
-（`pri=unix-31104000` 伴侣会加，非必须。）
-
-### 2.3 关播
-
-```
-POST webcast.amemv.com/webcast/room/ping/anchor/
-room_id=&stream_id=&status=4
-```
-
-### 2.4 Host 分工
-
-| Host | 用途 |
-|------|------|
-| `streamingtool.douyin.com` | 登录 passport / ttwid |
-| `webcast-pc.amemv.com` | create_info / create |
-| `webcast.amemv.com` | ping/anchor、check_exist、get_pc_obs_status、user/me（query 带 os_username 等） |
-
-### 2.5 状态机
-
-```
-ttwid → get_qrcode → check_qrconnect(confirmed) → 桌面 Cookie
-  → create_info → a_bogus → room/create → ping LIVING=2
-  → 推流
-  → ping FINISH=4
-```
+`ROOM_STATUS = {PREPARE:1, LIVING:2, PAUSE:3, FINISH:4}`。  
+**不要**再用「小 jssdk 包、无 a_bogus、create 走 webcast-pc」的旧笔记。
 
 ---
 
