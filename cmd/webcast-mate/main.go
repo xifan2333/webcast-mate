@@ -61,6 +61,7 @@ COMMANDS
   version            Show version
 
 FLAGS
+  -y, --yes          Non-interactive (use saved config / defaults)
   -h, --help         Show this help
   -v, --version      Show version
 
@@ -75,6 +76,7 @@ OUTPUT
 
 EXAMPLES
   $ webcast-mate start bilibili
+  $ webcast-mate start bilibili -y
   $ out=$(webcast-mate start douyin)
   $ echo "$out" | jq -r .server
   $ webcast-mate stop douyin
@@ -85,7 +87,7 @@ CONFIG
   (currently: %s)
 
 STATUS
-  bilibili: implemented (QR login + start/stop)
+  bilibili: QR login + huh prompts (title/area/cover) + start/stop; -y skips prompts
   douyin / xiaohongshu: stub
 `, confPathDisplay())
 }
@@ -102,18 +104,22 @@ func cmdStart(args []string) int {
 	if hasHelp(args) {
 		fmt.Print(`Go live on a platform.
 
-Ensures session, opens the room, obtains RTMP server/key, writes
-~/.config/livestream/platforms.conf, prints one JSON line.
+Interactive (default, TTY): prompt room / title / area / cover (huh),
+then open. Use -y to skip prompts and use ~/.config/webcast-mate/<platform>/.
 
 USAGE
-  webcast-mate start <platform>
+  webcast-mate start <platform> [-y]
+
+FLAGS
+  -y, --yes   Non-interactive
 
 OUTPUT
   {"platform":"…","room_id":"…","cookie":"…","server":"…","key":"…"}
 `)
 		return 0
 	}
-	id, code := parsePlatformArg(args, "start")
+	yes, rest := stripYes(args)
+	id, code := parsePlatformArg(rest, "start")
 	if code != 0 {
 		return code
 	}
@@ -123,12 +129,11 @@ OUTPUT
 		return 1
 	}
 	ctx := context.Background()
-	res, err := a.Start(ctx)
+	res, err := a.Start(ctx, adapter.StartOpts{Yes: yes})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return exitCode(err)
 	}
-	// write conf when real adapters return server/key
 	if res.Server != "" || res.Key != "" {
 		if err := writeConf(string(id), res.Server, res.Key); err != nil {
 			fmt.Fprintf(os.Stderr, "write conf: %v\n", err)
@@ -170,6 +175,18 @@ OUTPUT
 		res.Status = "stopped"
 	}
 	return printJSON(res)
+}
+
+func stripYes(args []string) (yes bool, rest []string) {
+	for _, a := range args {
+		switch a {
+		case "-y", "--yes":
+			yes = true
+		default:
+			rest = append(rest, a)
+		}
+	}
+	return yes, rest
 }
 
 func parsePlatformArg(args []string, cmd string) (platform.ID, int) {

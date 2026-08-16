@@ -67,12 +67,17 @@ Next: xiaohongshu → douyin (+ keepalive).
 ### bilibili setup
 
 ```bash
-# edit room_id (real room id) and area_v2
-$EDITOR ~/.config/webcast-mate/bilibili/config.yaml
+# interactive (npm-init style): room / title / area / cover
+webcast-mate start bilibili
 
-webcast-mate start bilibili   # QR login on first run → JSON
+# non-interactive: use saved config
+webcast-mate start bilibili -y
+
 webcast-mate stop bilibili
 ```
+
+Config is saved to `~/.config/webcast-mate/bilibili/config.yaml`.
+Cover accepts an existing `*.hdslb.com` URL (local file upload TBD).
 
 ## Reference
 

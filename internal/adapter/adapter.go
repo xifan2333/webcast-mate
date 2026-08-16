@@ -27,7 +27,8 @@ type Adapter interface {
 	ID() platform.ID
 	// Start ensures session, goes live, writes conf side-effects via caller,
 	// and returns the JSON fields. Douyin may start a keepalive externally.
-	Start(ctx context.Context) (*StartResult, error)
+	// opts.Yes skips interactive prompts (npm-init style -y).
+	Start(ctx context.Context, opts StartOpts) (*StartResult, error)
 	// Stop ends the live session. Missing room must return success (idempotent).
 	Stop(ctx context.Context) (*StopResult, error)
 }

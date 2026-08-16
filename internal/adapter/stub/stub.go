@@ -17,8 +17,9 @@ func New(id platform.ID) *Stub { return &Stub{id: id} }
 
 func (s *Stub) ID() platform.ID { return s.id }
 
-func (s *Stub) Start(ctx context.Context) (*adapter.StartResult, error) {
+func (s *Stub) Start(ctx context.Context, opts adapter.StartOpts) (*adapter.StartResult, error) {
 	_ = ctx
+	_ = opts
 	return nil, fmt.Errorf("%s: start not implemented yet", s.id)
 }
 

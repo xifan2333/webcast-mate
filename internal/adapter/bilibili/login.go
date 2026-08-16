@@ -190,7 +190,7 @@ func (c *Client) loginQR(ctx context.Context) (*Session, error) {
 	}
 }
 
-// printQR prints a terminal QR with go-qrcode defaults (ToSmallString).
+// printQR prints a compact terminal QR (go-qrcode, no quiet-zone border).
 func printQR(content, filename string) {
 	_ = filename
 	if content == "" {
@@ -201,6 +201,6 @@ func printQR(content, filename string) {
 		fmt.Fprintf(os.Stderr, "bilibili: qr: %v\n", err)
 		return
 	}
-	// library default compact terminal art; no custom aspect hacks
+	q.DisableBorder = true // smaller in terminal
 	fmt.Fprint(os.Stderr, q.ToSmallString(false))
 }

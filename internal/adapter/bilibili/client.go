@@ -16,11 +16,12 @@ const (
 	urlQRGenerate = "https://passport.bilibili.com/x/passport-login/web/qrcode/generate"
 	urlQRPoll     = "https://passport.bilibili.com/x/passport-login/web/qrcode/poll"
 	urlNav        = "https://api.bilibili.com/x/web-interface/nav"
-	urlStartLive  = "https://api.live.bilibili.com/room/v1/Room/startLive"
-	urlStopLive   = "https://api.live.bilibili.com/room/v1/Room/stopLive"
-	urlUpdateRoom = "https://api.live.bilibili.com/room/v1/Room/update"
-	urlFaceAuth   = "https://api.live.bilibili.com/xlive/app-blink/v1/preLive/IsUserIdentifiedByFaceAuth"
-	urlRoomInfo   = "https://api.live.bilibili.com/room/v1/Room/get_info"
+	urlStartLive      = "https://api.live.bilibili.com/room/v1/Room/startLive"
+	urlStopLive       = "https://api.live.bilibili.com/room/v1/Room/stopLive"
+	urlUpdateRoom     = "https://api.live.bilibili.com/room/v1/Room/update"
+	urlUpdatePreLive  = "https://api.live.bilibili.com/xlive/app-blink/v1/preLive/UpdatePreLiveInfo"
+	urlFaceAuth       = "https://api.live.bilibili.com/xlive/app-blink/v1/preLive/IsUserIdentifiedByFaceAuth"
+	urlRoomInfo       = "https://api.live.bilibili.com/room/v1/Room/get_info"
 )
 
 type Client struct {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/xifan2333/webcast-mate/internal/session"
@@ -71,16 +72,21 @@ type startLiveData struct {
 	} `json:"rtmp"`
 }
 
-func (c *Client) updateTitle(roomID, title, csrf string) error {
-	if title == "" {
+func (c *Client) updateRoom(roomID, title, areaID, csrf string) error {
+	if title == "" && areaID == "" {
 		return nil
 	}
 	form := url.Values{}
 	form.Set("room_id", roomID)
-	form.Set("title", title)
 	form.Set("platform", "pc_link")
 	form.Set("csrf_token", csrf)
 	form.Set("csrf", csrf)
+	if title != "" {
+		form.Set("title", title)
+	}
+	if areaID != "" {
+		form.Set("area_id", areaID)
+	}
 	b, err := c.doJSON("POST", urlUpdateRoom, form, nil)
 	if err != nil {
 		return err
@@ -94,7 +100,40 @@ func (c *Client) updateTitle(roomID, title, csrf string) error {
 		if msg == "" {
 			msg = env.Msg
 		}
-		return fmt.Errorf("update title: %s (%d)", msg, env.Code)
+		return fmt.Errorf("update room: %s (%d)", msg, env.Code)
+	}
+	return nil
+}
+
+// updateCover sets cover via UpdatePreLiveInfo (URL must be on *.hdslb.com).
+func (c *Client) updateCover(coverURL, csrf string) error {
+	if coverURL == "" {
+		return nil
+	}
+	form := url.Values{}
+	form.Set("platform", "web")
+	form.Set("mobi_app", "web")
+	form.Set("build", "1")
+	form.Set("cover", coverURL)
+	form.Set("coverVertical", "")
+	form.Set("liveDirectionType", "1")
+	form.Set("visit_id", "")
+	form.Set("csrf_token", csrf)
+	form.Set("csrf", csrf)
+	b, err := c.doJSON("POST", urlUpdatePreLive, form, nil)
+	if err != nil {
+		return err
+	}
+	var env apiEnvelope
+	if err := json.Unmarshal(b, &env); err != nil {
+		return err
+	}
+	if env.Code != 0 {
+		msg := env.Message
+		if msg == "" {
+			msg = env.Msg
+		}
+		return fmt.Errorf("update cover: %s (%d)", msg, env.Code)
 	}
 	return nil
 }
@@ -170,15 +209,20 @@ func (c *Client) waitFaceAuth(ctx context.Context, roomID, qr, csrf string) erro
 	}
 }
 
-// StartLive runs update title + startLive (+ face auth retry).
+// StartLive applies title/area/cover then startLive (+ face auth retry).
 func (c *Client) StartLive(ctx context.Context, cfg *Config) (server, key string, err error) {
 	csrf := c.csrf()
 	if csrf == "" {
 		return "", "", ErrNotLoggedIn
 	}
-	if err := c.updateTitle(cfg.RoomID, cfg.Title, csrf); err != nil {
-		// non-fatal? oil monkey treats as fatal — keep fatal
+	if err := c.updateRoom(cfg.RoomID, cfg.Title, cfg.AreaV2, csrf); err != nil {
 		return "", "", err
+	}
+	if cover := strings.TrimSpace(cfg.Cover); cover != "" {
+		if err := c.applyCover(cover, csrf); err != nil {
+			// cover optional — warn but continue open
+			fmt.Fprintf(os.Stderr, "bilibili: cover: %v\n", err)
+		}
 	}
 
 	data, code, msg, err := c.startLiveOnce(cfg.RoomID, cfg.AreaV2, csrf)
@@ -201,6 +245,22 @@ func (c *Client) StartLive(ctx context.Context, cfg *Config) (server, key string
 		return "", "", fmt.Errorf("startLive: empty rtmp")
 	}
 	return data.RTMP.Addr, data.RTMP.Code, nil
+}
+
+// applyCover sets cover URL via UpdatePreLiveInfo.
+// Local file upload is not implemented yet; only https://*.hdslb.com/… URLs work.
+func (c *Client) applyCover(cover, csrf string) error {
+	if strings.HasPrefix(cover, "http://") || strings.HasPrefix(cover, "https://") {
+		if !strings.Contains(cover, "hdslb.com") {
+			return fmt.Errorf("cover URL must be on *.hdslb.com (got %s)", cover)
+		}
+		return c.updateCover(cover, csrf)
+	}
+	// local path — not yet: needs BFS upload token flow
+	if _, err := os.Stat(cover); err == nil {
+		return fmt.Errorf("local cover upload not implemented yet; use an existing hdslb.com URL or leave empty")
+	}
+	return fmt.Errorf("invalid cover %q", cover)
 }
 
 // StopLive ends the stream.
