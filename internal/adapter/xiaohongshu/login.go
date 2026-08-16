@@ -143,6 +143,7 @@ func (c *Client) loginQR(ctx context.Context) (*SecretData, error) {
 
 	deadline := time.Now().Add(3 * time.Minute)
 	stURI := "/api/sns/web/v1/login/qrcode/status"
+	lastStatus := -1
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -175,8 +176,9 @@ func (c *Client) loginQR(ctx context.Context) (*SecretData, error) {
 		resp.Body.Close()
 
 		var st struct {
-			Code int `json:"code"`
-			Data struct {
+			Code    int  `json:"code"`
+			Success bool `json:"success"`
+			Data    struct {
 				CodeStatus int `json:"code_status"`
 				LoginInfo  struct {
 					Session string `json:"session"`
@@ -184,28 +186,37 @@ func (c *Client) loginQR(ctx context.Context) (*SecretData, error) {
 				} `json:"login_info"`
 			} `json:"data"`
 		}
-		_ = json.Unmarshal(body, &st)
+		if err := json.Unmarshal(body, &st); err != nil || st.Code != 0 {
+			// surface API errors so user knows poll is failing
+			var raw map[string]any
+			_ = json.Unmarshal(body, &raw)
+			fmt.Fprintf(os.Stderr, "xiaohongshu: qr status: %s\n", truncate(string(body), 160))
+			time.Sleep(time.Second)
+			continue
+		}
+
+		if st.Data.CodeStatus != lastStatus {
+			lastStatus = st.Data.CodeStatus
+			switch st.Data.CodeStatus {
+			case 0:
+				fmt.Fprintln(os.Stderr, "xiaohongshu: waiting for scan…")
+			case 1:
+				fmt.Fprintln(os.Stderr, "xiaohongshu: scanned, confirm on phone")
+			case 2:
+				fmt.Fprintln(os.Stderr, "xiaohongshu: confirmed")
+			case 3:
+				fmt.Fprintln(os.Stderr, "xiaohongshu: qr expired")
+			default:
+				fmt.Fprintf(os.Stderr, "xiaohongshu: qr code_status=%d\n", st.Data.CodeStatus)
+			}
+		}
 
 		switch st.Data.CodeStatus {
-		case 0:
-		case 1:
-			fmt.Fprintln(os.Stderr, "xiaohongshu: scanned, confirm on phone")
+		case 0, 1:
+			// keep polling
 		case 2:
-			if st.Data.LoginInfo.Session != "" {
-				c.WebSession = st.Data.LoginInfo.Session
-			}
-			if st.Data.LoginInfo.UserID != "" {
-				c.UserID = st.Data.LoginInfo.UserID
-			}
-			// Some responses put session at data.session
-			var raw map[string]any
-			if json.Unmarshal(body, &raw) == nil {
-				if data, ok := raw["data"].(map[string]any); ok {
-					if s, ok := data["session"].(string); ok && s != "" {
-						c.WebSession = s
-					}
-				}
-			}
+			// parse session from several possible shapes
+			applyQRLoginPayload(c, body, &st.Data.LoginInfo.Session, &st.Data.LoginInfo.UserID)
 			s := &SecretData{
 				Cookie:   c.cookieHeader(),
 				UserID:   c.UserID,
@@ -357,4 +368,40 @@ func isInteractive() bool {
 		return false
 	}
 	return (fi.Mode() & os.ModeCharDevice) != 0
+}
+
+// applyQRLoginPayload extracts session/user_id from status response variants.
+func applyQRLoginPayload(c *Client, body []byte, sessionHint, userHint *string) {
+	if sessionHint != nil && *sessionHint != "" {
+		c.WebSession = *sessionHint
+	}
+	if userHint != nil && *userHint != "" {
+		c.UserID = *userHint
+	}
+	var raw map[string]any
+	if json.Unmarshal(body, &raw) != nil {
+		return
+	}
+	data, _ := raw["data"].(map[string]any)
+	if data == nil {
+		return
+	}
+	// data.session / data.web_session
+	for _, k := range []string{"session", "web_session", "secure_session"} {
+		if s, ok := data[k].(string); ok && s != "" {
+			c.WebSession = s
+		}
+	}
+	if uid, ok := data["user_id"].(string); ok && uid != "" {
+		c.UserID = uid
+	}
+	// data.login_info.{session,user_id}
+	if li, ok := data["login_info"].(map[string]any); ok {
+		if s, ok := li["session"].(string); ok && s != "" {
+			c.WebSession = s
+		}
+		if uid, ok := li["user_id"].(string); ok && uid != "" {
+			c.UserID = uid
+		}
+	}
 }

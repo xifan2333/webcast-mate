@@ -11,6 +11,7 @@ import (
 	"hash/crc32"
 	"math/rand"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -136,8 +137,15 @@ func buildContentString(method, uri string, payload any) (string, error) {
 	if len(m) == 0 {
 		return uri, nil
 	}
+	// Stable alphabetical key order — must match url.Values.Encode() on the wire.
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
 	parts := make([]string, 0, len(m))
-	for k, v := range m {
+	for _, k := range keys {
+		v := m[k]
 		var vs string
 		switch t := v.(type) {
 		case nil:
@@ -154,8 +162,6 @@ func buildContentString(method, uri string, payload any) (string, error) {
 		// xhshow GET: urllib.parse.quote(value, safe=",")
 		parts = append(parts, k+"="+url.QueryEscape(vs))
 	}
-	// Note: map iteration order is random; for GET without params we don't care.
-	// activate/lt don't use GET params in our path.
 	return uri + "?" + strings.Join(parts, "&"), nil
 }
 
