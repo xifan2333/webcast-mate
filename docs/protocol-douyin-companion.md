@@ -737,3 +737,168 @@ out  = byted_acrawler.frontierSign(stub)
 | passport 拦截器 p_bd / source_info | `18610.*.js` |
 | bdms glue 加载与 include | `2301.*.js` |
 | IM X-Bogus frontierSign | `12105` / `5914` / `71047` 等 |
+
+---
+
+## 10. 更深一层：device_register 加密体 + bdms 加载（静态续）
+
+> 续 §9：把「native k(e)」和「a_bogus 从哪挂上」再拆开。  
+> 本次全量抓包**未**含 `device_register`（did 已缓存，启动直接复用）。
+
+### 10.1 `deviceIdManage` 何时打注册
+
+**文件：** `resources/app/index.js`
+
+```text
+CHECK_CODE = `${channel}-${appVersion}-${aid}-${deviceId}[-BOE]`
+若 Number(deviceId) 真 且 CHECK_CODE 未变 且 String(installId).length > 1
+  → return 旧 did（不发网）
+否则 → registry() → active() → 写 appStore
+```
+
+因此冷启动且本地已有合法 did/iid 时，抓包看不到 register——与本次会话一致。
+
+### 10.2 `registry()` 明文 header（加密前）
+
+并行采集后组装 `P`（再可能被 fix API 改写）：
+
+| 字段 | 来源 |
+|------|------|
+| `os` / `device_platform` / `device_type` | 常量（windows 系） |
+| `sdk_version` | `"1.0.2"` |
+| `aid` / `channel` / `package` | `2079` / channel / `"webcast_mate"` |
+| `app_version` / `os_version` | 包版本 / `os.release()` |
+| `device_model` | WMI/系统 model |
+| `pc_uuid` | 机器 uuid |
+| `pc_serial` | 磁盘/板序列相关 |
+| `mc` | 首个非空网卡 MAC |
+| `time_zone` / `tz_name` / `tz_offset` | 本地时区 |
+| `resolution` | 主屏 `WxH`（`x` 连接） |
+| `display_name` | `encodeURIComponent("直播伴侣")` |
+| `device_id` / `install_id` | 仅已有时带上 |
+| `app_region` / `app_language` / `language` | 可空 |
+
+**改写：**
+
+```text
+POST https://streamingtool.douyin.com/mate_core/api/device/fix-device-fingerprint
+body: { ...P, ...额外指纹 N }
+若 data.mate_fixed：
+  用返回字段覆盖 P
+  若 mate_fixed===1：删除 P.device_id / P.install_id（强制服务端新发）
+```
+
+### 10.3 加密：`logEncrypt` → 二进制 POST body
+
+```text
+plain = JSON.stringify({
+  header: { ...P },
+  _gen_time: 0,
+  magic_tag: "ss_app_log"
+})
+
+meta = { version: 3, sub_version: 3, magic_number: 29795, key: "I+D&*76:j27kVH<us9&d" }
+body = logEncrypt(meta, plain)   // → ArrayBuffer / Uint8Array
+
+POST {DOMAIN}/service/2/desktop/device_register/
+Content-Type: application/json
+User-Agent: TTNetwork PC
+body: raw bytes (不是 JSON 文本)
+```
+
+#### `logEncrypt` 算法轮廓（`index.js` 内嵌模块，可移植）
+
+```text
+1. stdKey = 从 meta.key 派生 16 字节:
+   - UTF-8(key) 填入 16 字节缓冲（短则停）
+   - 不足 16：t[i] = sbox1[t[i-len]]
+   - 整 16：t[i] = sbox0[t[i]]
+   - 再拼成 4 个 uint32 大端
+
+2. gzip(plain UTF-8):
+   level=6, memLevel=4, gzip header os=3, time=now_sec
+
+3. 头 6 字节 r:
+   [magic>>8, magic&ff, version, padFlag, sub_version>>8, sub_version&ff]
+   magic=29795, version=3, sub_version=3
+
+4. 对 gzip 结果按 blockSize=16 PKCS 风格填充；r[3]=填充长
+
+5. 每字节 sbox0 置换
+
+6. 每 16 字节一块做位旋转 + 与 stdKey 相关的变换 l(stdKey, …)
+   （类 AES 风格的自定义块变换，不是标准 AES-CBC 库调用）
+
+7. 输出: r || 所有密文块   → Uint8Array.buffer
+```
+
+`sbox0` 开篇即标准 AES S-box 序列（99,124,119,…）。  
+历史 Python 对照（已删的 `log_encrypt.py`）与此同源；**实现可从 `index.js` 该模块直接移植**，无需 native `.node`。
+
+#### 响应（业务期望）
+
+```text
+e.device_id 非 0
+映射到 store:
+  device_id_str / install_id_str
+  + 本地补的 model/manufacturer/serial/uuid/os_version/disk_serial/os_mac
+```
+
+（`deviceIdManage` 读的是 `device_id_str` / `install_id_str`；`registry` then 分支看 `e.device_id`——以真包为准对齐字段名。）
+
+### 10.4 激活 `app_alert_check`
+
+```text
+POST {DOMAIN}/service/2/app_alert_check/?aid&app_name&channel&device_id&iid&os&device_platform&version_code&…
+UA: TTNetwork PC
+成功 message === "success" 后才把 did/iid 等写入 appStore + CHECK_CODE
+```
+
+### 10.5 bdms / sdk_glue 如何进页面（`2301`）
+
+```text
+loadAcrawler / setBytedAcrawlerInit(containerType):
+  等 appInfo.APP_ID
+  注入 inline script:
+    1) pre-handler：cookie gfkadpd 记录 aid,pageId；监控 mon.zijieapi.com
+    2) init：window._SdkGlueInit({ self:{aid,pageId}, bdms:{ paths.include, ddrt:3, aid, pageId }})
+  pageId 表: 2079 → 40236
+  include 默认含 "/webcast/*"（jelly-bean 等容器再追加 OSS/DB 路径）
+  若已有更新 glue 则跳过；失败最多 retry 5 次、间隔 1s
+```
+
+加载状态机（同文件）区分：
+
+- `loadMap.bdms` → 路径匹配则 **BdmsBlock**（给请求挂 bdms 签名）
+- `loadMap.csrf` → **CSRFBlock**（secsdk 保护路径）
+- `loadMap.verifyCenter` → 验证中心拦截路径
+
+`p_bd`（登录 query）= `window._sdkGlueVersionMap.bdmsVersion`（抓包 `1.0.1.20`）。
+
+**结论：** 业务 JS **不计算** a_bogus；只要 glue 加载成功且 path 命中 include，**底层改写 XHR/fetch query**。  
+自研客户端必须：**自己实现等价签名**，或 **嵌入/调用同一 bdms**（Chromium 注入、外部 CMD 等）。
+
+### 10.6 IM 的 `frontierSign`（旁路，防混淆）
+
+```text
+X-MS-STUB = md5( 配置表里列出的 query 值按名拼接 )
+window.byted_acrawler.frontierSign({ "X-MS-STUB": stub })
+→ 若含 X-Bogus，改名为 signature 并入 query
+```
+
+用于 `im/fetch` 等，**不是** `room/create` 主链的 `a_bogus` 拼装点；但依赖同一 `byted_acrawler` 运行时。
+
+### 10.7 对 webcast-mate 的可执行拆分
+
+| 模块 | 难度 | 依据 |
+|------|------|------|
+| `logEncrypt` + device_register/active | 中（纯算法+HTTP） | §10.2–10.4 静态完整 |
+| ENV + getCommonParams + extra_* | 低 | §9.3–9.4 |
+| create/ping body 状态机 | 低 | §2–3 / 96458 |
+| passport 业务字段 + 轮询 | 低–中 | §1 / 38514 |
+| account_sdk_source_info | 中高 | browserInfo 编码未全展开 |
+| **a_bogus（登录+开播）** | **高** | 仅知挂载点与 include，算法在 glue 二进制/远程脚本 |
+| x-secsdk-csrf | 中 | secsdk 与 csrf cookie |
+
+推荐研发序：  
+**logEncrypt 设备注册 → 复用已有 session 打通 create/ping → 再攻坚登录 a_bogus**（开播 a_bogus 与现 adapter 的 bdms 路径可合并）。
