@@ -74,16 +74,16 @@ func ResolveConfig(ctx context.Context, cli *Client, opts adapter.StartOpts) (*C
 
 	if len(areaOptions) > 0 {
 		fields = append(fields, huh.NewSelect[string]().
-			Title("直播间分类").
-			Description("选择本次直播的分区").
+			Title("分区").
+			Description("本次直播所属分区").
 			Options(areaOptions...).
 			Value(&areaV2).
 			Height(12).
 			Filtering(true))
 	} else {
 		fields = append(fields, huh.NewInput().
-			Title("直播间分类").
-			Description("未能拉取列表时，可填写分类编号").
+			Title("分区").
+			Description("未能拉取列表时，可填写分区编号").
 			Value(&areaV2).
 			Validate(func(s string) error {
 				if s == "" {
@@ -98,7 +98,9 @@ func ResolveConfig(ctx context.Context, cli *Client, opts adapter.StartOpts) (*C
 		Description("已有封面图链接（可选，留空跳过）").
 		Value(&cover))
 
-	form := huh.NewForm(huh.NewGroup(fields...)).WithTheme(huh.ThemeCharm())
+	form := huh.NewForm(
+		huh.NewGroup(fields...).Title("开播设置"),
+	).WithTheme(huh.ThemeCharm())
 	if err := form.Run(); err != nil {
 		return nil, err
 	}
