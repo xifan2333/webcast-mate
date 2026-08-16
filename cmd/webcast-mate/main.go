@@ -10,8 +10,11 @@ import (
 	"github.com/xifan2333/webcast-mate/internal/adapter"
 	"github.com/xifan2333/webcast-mate/internal/adapter/bilibili"
 	"github.com/xifan2333/webcast-mate/internal/adapter/stub"
+	"github.com/xifan2333/webcast-mate/internal/appcfg"
 	"github.com/xifan2333/webcast-mate/internal/appdir"
+	"github.com/xifan2333/webcast-mate/internal/live"
 	"github.com/xifan2333/webcast-mate/internal/platform"
+	"github.com/xifan2333/webcast-mate/internal/secrets"
 )
 
 // version is overridden at link time:
@@ -39,6 +42,8 @@ func run(args []string) int {
 		return cmdStart(args[1:])
 	case "stop":
 		return cmdStop(args[1:])
+	case "status":
+		return cmdStatus(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command %q\n\n", args[0])
 		printHelp()
@@ -54,8 +59,9 @@ USAGE
   webcast-mate <command> <platform>
 
 COMMANDS
-  start <platform>   Go live: session + RTMP + update live.json
-  stop  <platform>   End live (idempotent)
+  start  <platform>  Go live: session + RTMP + update live.json
+  stop   <platform>  End live (idempotent)
+  status <platform>  Current session + push fields (same shape as start)
 
   help               Show this help
   version            Show version
@@ -69,8 +75,11 @@ PLATFORMS
   bilibili  douyin  xiaohongshu
 
 OUTPUT
-  start   one JSON line: platform, room_id, cookie, server, key
-  stop    one JSON line: platform, room_id, status
+  start / status   one JSON line: platform, room_id, cookie, server, key
+  stop             one JSON line: platform, room_id, status
+
+  status is live when server+key are set (from live.json); otherwise idle
+  (cookie still filled from secrets when present).
 
   Diagnostics go to stderr. Pipe stdout to jq.
 
@@ -80,6 +89,7 @@ EXAMPLES
   $ out=$(webcast-mate start douyin)
   $ echo "$out" | jq -r .server
   $ webcast-mate stop douyin
+  $ webcast-mate status bilibili | jq .
 
 CONFIG
   $XDG_CONFIG_HOME/webcast-mate/
@@ -137,6 +147,54 @@ OUTPUT
 		return exitCode(err)
 	}
 	return printJSON(res)
+}
+
+func cmdStatus(args []string) int {
+	if hasHelp(args) {
+		fmt.Print(`Show current live session for a platform.
+
+Same JSON fields as start success (platform, room_id, cookie, server, key).
+Reads live.json + secrets; does not call remote APIs.
+
+USAGE
+  webcast-mate status <platform>
+
+OUTPUT
+  {"platform":"…","room_id":"…","cookie":"…","server":"…","key":"…","status":"live|idle"}
+`)
+		return 0
+	}
+	id, code := parsePlatformArg(args, "status")
+	if code != 0 {
+		return code
+	}
+	out := statusResult{Platform: string(id), Status: "idle"}
+
+	if t, ok := live.Get(string(id)); ok && (t.Server != "" || t.Key != "") {
+		out.RoomID = t.RoomID
+		out.Server = t.Server
+		out.Key = t.Key
+		out.Status = "live"
+	}
+	if s, err := secrets.Load(string(id)); err == nil && s != nil {
+		out.Cookie = s.Cookie
+	}
+	// fill room_id from config when not live
+	if out.RoomID == "" {
+		if f, err := appcfg.Load(); err == nil {
+			out.RoomID = f.GetPlatform(string(id)).RoomID
+		}
+	}
+	return printJSON(out)
+}
+
+type statusResult struct {
+	Platform string `json:"platform"`
+	RoomID   string `json:"room_id"`
+	Cookie   string `json:"cookie"`
+	Server   string `json:"server"`
+	Key      string `json:"key"`
+	Status   string `json:"status"` // live | idle
 }
 
 func cmdStop(args []string) int {
