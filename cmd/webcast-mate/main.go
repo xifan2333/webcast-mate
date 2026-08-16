@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/xifan2333/webcast-mate/internal/adapter"
 	"github.com/xifan2333/webcast-mate/internal/adapter/bilibili"
@@ -15,12 +14,13 @@ import (
 	"github.com/xifan2333/webcast-mate/internal/platform"
 )
 
-// version is overridden at link time:
-//
-//	go build -ldflags "-X main.version=v0.1.0" ./cmd/webcast-mate
 var version = "dev"
 
 func main() {
+	// detached douyin keepalive child (SPEC §5.4)
+	if douyin.IsKeepaliveChild() {
+		os.Exit(douyin.RunKeepalive())
+	}
 	os.Exit(run(os.Args[1:]))
 }
 
@@ -36,70 +36,195 @@ func run(args []string) int {
 	case "-v", "--version", "version":
 		fmt.Println("webcast-mate", version)
 		return 0
-	case "start":
-		return cmdStart(args[1:])
-	case "stop":
-		return cmdStop(args[1:])
-	case "status":
-		return cmdStatus(args[1:])
+	case "login", "logout", "start", "stop", "status":
+		return runCommand(args[0], args[1:])
 	default:
-		fmt.Fprintf(os.Stderr, "unknown command %q\n\n", args[0])
-		printHelp()
-		return 2
+		return fail(2, args[0], "", fmt.Sprintf("unknown command %q", args[0]))
 	}
 }
 
+// cmdSpec is one subcommand. run performs the adapter call and returns the
+// stdout payload; runCommand adds the common ok/command/platform fields.
+type cmdSpec struct {
+	help    string
+	withYes bool // start-style -y flag
+	run     func(a adapter.Adapter, opts adapter.StartOpts) (map[string]any, error)
+}
+
+var commands = map[string]cmdSpec{
+	"login": {
+		help: `login <platform> — ensure session (QR/CAS if needed), write secrets.
+
+OUTPUT (stdout JSONL)
+  {"ok":true,"command":"login","platform":"…","user_id":"…","user_name":"…","cookies":{…},"headers":{…},"params":{…},"login_at":"…"}
+`,
+		run: func(a adapter.Adapter, _ adapter.StartOpts) (map[string]any, error) {
+			res, err := a.Login(context.Background())
+			if err != nil {
+				return nil, err
+			}
+			return map[string]any{
+				"user_id": res.UserID, "user_name": res.UserName,
+				"cookies": res.Cookies, "headers": res.Headers, "params": res.Params,
+				"login_at": res.LoginAt,
+			}, nil
+		},
+	},
+	"logout": {
+		help: `logout <platform> — clear local secrets (idempotent).
+
+OUTPUT (stdout JSONL)
+  {"ok":true,"command":"logout","platform":"…","status":"logged_out"}
+`,
+		run: func(a adapter.Adapter, _ adapter.StartOpts) (map[string]any, error) {
+			res, err := a.Logout(context.Background())
+			if err != nil {
+				return nil, err
+			}
+			st := res.Status
+			if st == "" {
+				st = "logged_out"
+			}
+			return map[string]any{"status": st}, nil
+		},
+	},
+	"start": {
+		help: `start <platform> [-y] — go live.
+
+OUTPUT (stdout JSONL)
+  {"ok":true,"command":"start","platform":"…","room_id":"…","cookies":{…},"headers":{…},"params":{…},"server":"…","key":"…"}
+`,
+		withYes: true,
+		run: func(a adapter.Adapter, opts adapter.StartOpts) (map[string]any, error) {
+			res, err := a.Start(context.Background(), opts)
+			if err != nil {
+				return nil, err
+			}
+			return map[string]any{
+				"room_id": res.RoomID,
+				"cookies": res.Cookies, "headers": res.Headers, "params": res.Params,
+				"server": res.Server, "key": res.Key,
+			}, nil
+		},
+	},
+	"status": {
+		help: `status <platform> — query live state + push fields.
+
+OUTPUT (stdout JSONL)
+  {"ok":true,"command":"status","platform":"…","room_id":"…","cookies":{…},"headers":{…},"params":{…},"server":"…","key":"…","status":"live|idle|round"}
+`,
+		run: func(a adapter.Adapter, _ adapter.StartOpts) (map[string]any, error) {
+			res, err := a.Status(context.Background())
+			if err != nil {
+				return nil, err
+			}
+			return map[string]any{
+				"room_id": res.RoomID,
+				"cookies": res.Cookies, "headers": res.Headers, "params": res.Params,
+				"server": res.Server, "key": res.Key, "status": res.Status,
+			}, nil
+		},
+	},
+	"stop": {
+		help: `stop <platform> — end live (idempotent).
+
+OUTPUT (stdout JSONL)
+  {"ok":true,"command":"stop","platform":"…","room_id":"…","status":"stopped"}
+`,
+		run: func(a adapter.Adapter, _ adapter.StartOpts) (map[string]any, error) {
+			res, err := a.Stop(context.Background())
+			if err != nil {
+				return nil, err
+			}
+			st := res.Status
+			if st == "" {
+				st = "stopped"
+			}
+			return map[string]any{"room_id": res.RoomID, "status": st}, nil
+		},
+	},
+}
+
+// runCommand dispatches one subcommand: parse platform → resolve adapter →
+// run → emit one JSONL result. All five commands share this shape.
+func runCommand(name string, args []string) int {
+	spec, ok := commands[name]
+	if !ok {
+		return fail(2, name, "", fmt.Sprintf("unknown command %q", name))
+	}
+	if hasHelp(args) {
+		fmt.Fprint(os.Stderr, spec.help)
+		return 0
+	}
+	yes := false
+	rest := args
+	if spec.withYes {
+		yes, rest = stripYes(args)
+	}
+	id, code := parsePlatformArg(rest, name)
+	if code != 0 {
+		return code
+	}
+	a, ok := registry().Get(id)
+	if !ok {
+		return fail(1, name, string(id), "no adapter")
+	}
+	res, err := spec.run(a, adapter.StartOpts{Yes: yes})
+	if err != nil {
+		return fail(exitCode(err), name, string(id), err.Error())
+	}
+	res["ok"] = true
+	res["command"] = name
+	res["platform"] = id
+	return out(res)
+}
+
 func printHelp() {
-	fmt.Printf(`Work with multi-platform live streaming protocol (no browser).
+	fmt.Fprintf(os.Stderr, `webcast-mate — multi-platform live protocol CLI (no browser)
 
 USAGE
-  webcast-mate
-  webcast-mate <command> <platform>
+  webcast-mate <command> <platform> [-y]
 
 COMMANDS
-  start  <platform>  Go live: session + RTMP + update live.json
-  stop   <platform>  End live (idempotent)
-  status <platform>  Current session + push fields (same shape as start)
-
-  help               Show this help
-  version            Show version
+  login   <platform>   ensure session (QR if needed) → secrets
+  logout  <platform>   clear local secrets (idempotent)
+  start   <platform>   go live → one JSONL result on stdout
+  stop    <platform>   end live (idempotent)
+  status  <platform>   room + push fields
+  version              tool version (plain text)
+  help                 this text (plain text, stderr)
 
 FLAGS
-  -y, --yes          Non-interactive (use saved config / defaults)
-  -h, --help         Show this help
-  -v, --version      Show version
+  -y, --yes            non-interactive (saved config / defaults)
 
 PLATFORMS
   bilibili  douyin  xiaohongshu
 
-OUTPUT
-  start / status   one JSON line: platform, room_id, cookie, server, key
-  stop             one JSON line: platform, room_id, status
+STDOUT (data commands: one JSONL object, SetEscapeHTML=false)
+  login/start/status carry auth as cookies/headers/params buckets:
+    {"ok":true,"command":"login","platform":"…","user_id":"…","user_name":"…",
+     "cookies":{…},"headers":{…},"params":{…},"login_at":"…"}
+    {"ok":true,"command":"start","platform":"…","room_id":"…",
+     "cookies":{…},"headers":{…},"params":{…},"server":"…","key":"…"}
+    {"ok":true,"command":"stop","platform":"…","room_id":"…","status":"stopped"}
+    {"ok":false,"command":"start","platform":"douyin","error":"…","code":3}
 
-  status is live when server+key are set (from live.json); otherwise idle
-  (cookie = secrets for bili/dy; xhs always empty — danmaku uses browser).
-
-  Diagnostics go to stderr. Pipe stdout to jq.
+STDERR
+  QR / face-auth graphics only (plain). help is plain. No progress spam.
 
 EXAMPLES
-  $ webcast-mate start bilibili
-  $ webcast-mate start bilibili -y
-  $ out=$(webcast-mate start douyin)
-  $ echo "$out" | jq -r .server
-  $ webcast-mate stop douyin
-  $ webcast-mate status bilibili | jq .
+  webcast-mate login bilibili | jq -c '{ok,user_name,user_id}'
+  webcast-mate start bilibili -y | jq -r .server
+  webcast-mate status douyin | jq -c .
+  webcast-mate stop xiaohongshu | jq -e .ok
+  webcast-mate logout douyin | jq -c .
 
 CONFIG
-  $XDG_CONFIG_HOME/webcast-mate/
-    config.yaml           preferences (room, title, 分区, bitrate)
-    secrets/<platform>.json   unified {cookie,user_id,user_name,login_at} (0600)
-    live.json             active push targets for capture
-  (root: %s)
-
-STATUS
-  bilibili: QR login + huh prompts (title/area/cover) + start/stop; -y skips prompts
-  xiaohongshu: live-helper CAS QR → redobs pre/start/stop (distribute)
-  douyin: streamingtool QR + create + ping LIVING/FINISH
+  %s/
+    config.yaml
+    secrets/<platform>.json
+    live.json
+    run/                     # douyin keepalive pid/log
 `, configRootDisplay())
 }
 
@@ -109,110 +234,6 @@ func registry() *adapter.Registry {
 		douyin.New(),
 		xiaohongshu.New(),
 	)
-}
-
-func cmdStart(args []string) int {
-	if hasHelp(args) {
-		fmt.Print(`Go live on a platform.
-
-Interactive (default, TTY): prompt room, title, category, cover,
-then go live. Use -y to skip prompts and use saved config.
-
-USAGE
-  webcast-mate start <platform> [-y]
-
-FLAGS
-  -y, --yes   Non-interactive
-
-OUTPUT
-  {"platform":"…","room_id":"…","cookie":"…","server":"…","key":"…"}
-`)
-		return 0
-	}
-	yes, rest := stripYes(args)
-	id, code := parsePlatformArg(rest, "start")
-	if code != 0 {
-		return code
-	}
-	a, ok := registry().Get(id)
-	if !ok {
-		fmt.Fprintf(os.Stderr, "no adapter for %s\n", id)
-		return 1
-	}
-	ctx := context.Background()
-	res, err := a.Start(ctx, adapter.StartOpts{Yes: yes})
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return exitCode(err)
-	}
-	return printJSON(res)
-}
-
-func cmdStatus(args []string) int {
-	if hasHelp(args) {
-		fmt.Print(`Query live status on the platform.
-
-Calls the platform room API for status (live|idle|…).
-Fills server/key from live.json; cookie from secrets (xhs empty)
-(same field names as start).
-
-USAGE
-  webcast-mate status <platform>
-
-OUTPUT
-  {"platform":"…","room_id":"…","cookie":"…","server":"…","key":"…","status":"live|idle|round"}
-`)
-		return 0
-	}
-	id, code := parsePlatformArg(args, "status")
-	if code != 0 {
-		return code
-	}
-	a, ok := registry().Get(id)
-	if !ok {
-		fmt.Fprintf(os.Stderr, "no adapter for %s\n", id)
-		return 1
-	}
-	res, err := a.Status(context.Background())
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return exitCode(err)
-	}
-	return printJSON(res)
-}
-
-func cmdStop(args []string) int {
-	if hasHelp(args) {
-		fmt.Print(`End live on a platform.
-
-Idempotent: no active room still exits 0.
-
-USAGE
-  webcast-mate stop <platform>
-
-OUTPUT
-  {"platform":"…","room_id":"…","status":"stopped"}
-`)
-		return 0
-	}
-	id, code := parsePlatformArg(args, "stop")
-	if code != 0 {
-		return code
-	}
-	a, ok := registry().Get(id)
-	if !ok {
-		fmt.Fprintf(os.Stderr, "no adapter for %s\n", id)
-		return 1
-	}
-	res, err := a.Stop(context.Background())
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
-	if res.Status == "" {
-		res.Status = "stopped"
-	}
-	return printJSON(res)
 }
 
 func stripYes(args []string) (yes bool, rest []string) {
@@ -229,26 +250,33 @@ func stripYes(args []string) (yes bool, rest []string) {
 
 func parsePlatformArg(args []string, cmd string) (platform.ID, int) {
 	if len(args) != 1 {
-		fmt.Fprintf(os.Stderr, "usage: webcast-mate %s <platform>\n", cmd)
+		fail(2, cmd, "", "usage: webcast-mate "+cmd+" <platform>")
 		return "", 2
 	}
 	id, ok := platform.Parse(args[0])
 	if !ok {
-		fmt.Fprintf(os.Stderr, "unknown platform %q\n", args[0])
+		fail(2, cmd, args[0], fmt.Sprintf("unknown platform %q", args[0]))
 		return "", 2
 	}
 	return id, 0
 }
 
-func printJSON(v any) int {
-	// Do not HTML-escape (& → \u0026); stream keys must stay raw for conf/scripts.
+// out writes one JSONL object to stdout, no HTML escaping.
+func out(v any) int {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetEscapeHTML(false)
 	if err := enc.Encode(v); err != nil {
-		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
 	return 0
+}
+
+// fail writes one failure JSONL to stdout (jq-safe) and returns the code.
+func fail(code int, command, platform, msg string) int {
+	_ = out(map[string]any{
+		"ok": false, "command": command, "platform": platform, "error": msg, "code": code,
+	})
+	return code
 }
 
 func hasHelp(args []string) bool {
@@ -261,32 +289,13 @@ func hasHelp(args []string) bool {
 }
 
 func configRootDisplay() string {
-	p, err := appdirRoot()
+	p, err := appdir.Root()
 	if err != nil || p == "" {
 		return "$XDG_CONFIG_HOME/webcast-mate"
 	}
 	return p
 }
 
-func appdirRoot() (string, error) {
-	return appdir.Root()
-}
-
 func exitCode(err error) int {
-	if err == nil {
-		return 0
-	}
-	s := err.Error()
-	switch {
-	case strings.Contains(s, "not configured"):
-		return 2
-	case strings.Contains(s, "not logged in"):
-		return 3
-	case strings.Contains(s, "not implemented"):
-		return 1
-	case strings.Contains(s, "qrcode"), strings.Contains(s, "timeout"), strings.Contains(s, "face auth"):
-		return 5
-	default:
-		return 1
-	}
+	return adapter.ExitCode(err)
 }

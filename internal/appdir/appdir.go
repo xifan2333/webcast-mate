@@ -76,3 +76,34 @@ func LivePath() (string, error) {
 	}
 	return filepath.Join(r, "live.json"), nil
 }
+
+// RunDir holds runtime pid/state (not secrets).
+func RunDir() (string, error) {
+	r, err := EnsureRoot()
+	if err != nil {
+		return "", err
+	}
+	d := filepath.Join(r, "run")
+	if err := os.MkdirAll(d, 0o700); err != nil {
+		return "", fmt.Errorf("appdir run: %w", err)
+	}
+	return d, nil
+}
+
+// DouyinKeepalivePID path for the background LIVING + token/beat process.
+func DouyinKeepalivePID() (string, error) {
+	d, err := RunDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(d, "douyin-keepalive.pid"), nil
+}
+
+// DouyinKeepaliveLog is stderr for the detached keepalive child.
+func DouyinKeepaliveLog() (string, error) {
+	d, err := RunDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(d, "douyin-keepalive.log"), nil
+}

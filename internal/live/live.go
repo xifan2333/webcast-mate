@@ -6,10 +6,13 @@
 package live
 
 import (
+	"fmt"
 	"os"
 	"time"
 
+	"github.com/xifan2333/webcast-mate/internal/adapter"
 	"github.com/xifan2333/webcast-mate/internal/appdir"
+	"github.com/xifan2333/webcast-mate/internal/platform"
 )
 
 // File is the whole live.json document.
@@ -60,36 +63,39 @@ func Save(f *File) error {
 	if len(f.Platforms) == 0 {
 		return appdir.Remove(path)
 	}
-	return appdir.WriteJSON(path, f)
+	if err := appdir.WriteJSON(path, f); err != nil {
+		return fmt.Errorf("%w: %v", adapter.ErrWriteConfig, err)
+	}
+	return nil
 }
 
 // Upsert adds or replaces a live target.
-func Upsert(platform string, t Target) error {
+func Upsert(id platform.ID, t Target) error {
 	f, err := Load()
 	if err != nil {
 		return err
 	}
-	f.Platforms[platform] = t
+	f.Platforms[string(id)] = t
 	return Save(f)
 }
 
 // Remove drops a platform; no-op if absent.
-func Remove(platform string) error {
+func Remove(id platform.ID) error {
 	f, err := Load()
 	if err != nil {
 		return err
 	}
-	delete(f.Platforms, platform)
+	delete(f.Platforms, string(id))
 	return Save(f)
 }
 
 // Get returns a target if live.
-func Get(platform string) (Target, bool) {
+func Get(id platform.ID) (Target, bool) {
 	f, err := Load()
 	if err != nil {
 		return Target{}, false
 	}
-	t, ok := f.Platforms[platform]
+	t, ok := f.Platforms[string(id)]
 	return t, ok
 }
 

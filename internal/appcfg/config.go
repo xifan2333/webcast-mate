@@ -1,10 +1,10 @@
 package appcfg
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/xifan2333/webcast-mate/internal/appdir"
+	"github.com/xifan2333/webcast-mate/internal/platform"
 	"gopkg.in/yaml.v3"
 )
 
@@ -22,9 +22,8 @@ type Defaults struct {
 // Platform holds durable open preferences for one platform.
 type Platform struct {
 	RoomID       string `yaml:"room_id,omitempty"`
-	AreaV2       string `yaml:"area_v2,omitempty"` // bilibili partition id (file only)
+	Area         string `yaml:"area,omitempty"` // partition: bili leaf id / dy base|leaf / xhs leaf id
 	Title        string `yaml:"title,omitempty"`
-	Cover        string `yaml:"cover,omitempty"`
 	VideoBitrate int    `yaml:"video_bitrate,omitempty"`
 	AudioBitrate int    `yaml:"audio_bitrate,omitempty"`
 }
@@ -33,7 +32,7 @@ func defaultFile() *File {
 	return &File{
 		Defaults: Defaults{VideoBitrate: 3200, AudioBitrate: 128},
 		Platforms: map[string]Platform{
-			"bilibili":    {AreaV2: "21", VideoBitrate: 3200, AudioBitrate: 128},
+			"bilibili":    {Area: "21", VideoBitrate: 3200, AudioBitrate: 128},
 			"douyin":      {VideoBitrate: 4000, AudioBitrate: 128},
 			"xiaohongshu": {VideoBitrate: 4000, AudioBitrate: 128},
 		},
@@ -60,6 +59,25 @@ func Load() (*File, error) {
 	if f.Platforms == nil {
 		f.Platforms = map[string]Platform{}
 	}
+	// migrate legacy area_v2 → area
+	var raw map[string]any
+	if yaml.Unmarshal(b, &raw) == nil {
+		if plats, _ := raw["platforms"].(map[string]any); plats != nil {
+			for id, pv := range plats {
+				pm, _ := pv.(map[string]any)
+				if pm == nil {
+					continue
+				}
+				p := f.Platforms[id]
+				if p.Area == "" {
+					if v, ok := pm["area_v2"].(string); ok && v != "" {
+						p.Area = v
+						f.Platforms[string(id)] = p
+					}
+				}
+			}
+		}
+	}
 	if f.Defaults.VideoBitrate == 0 {
 		f.Defaults.VideoBitrate = 3200
 	}
@@ -83,24 +101,24 @@ func Save(f *File) error {
 }
 
 // GetPlatform returns platform block or empty.
-func (f *File) GetPlatform(id string) Platform {
+func (f *File) GetPlatform(id platform.ID) Platform {
 	if f == nil || f.Platforms == nil {
 		return Platform{}
 	}
-	return f.Platforms[id]
+	return f.Platforms[string(id)]
 }
 
 // SetPlatform upserts and saves.
-func (f *File) SetPlatform(id string, p Platform) error {
+func (f *File) SetPlatform(id platform.ID, p Platform) error {
 	if f.Platforms == nil {
 		f.Platforms = map[string]Platform{}
 	}
-	f.Platforms[id] = p
+	f.Platforms[string(id)] = p
 	return Save(f)
 }
 
 // Bitrate returns effective bitrates for platform.
-func (f *File) Bitrate(id string) (video, audio int) {
+func (f *File) Bitrate(id platform.ID) (video, audio int) {
 	video, audio = f.Defaults.VideoBitrate, f.Defaults.AudioBitrate
 	p := f.GetPlatform(id)
 	if p.VideoBitrate > 0 {
@@ -137,14 +155,4 @@ func EnsureExists() error {
 		return nil
 	}
 	return Save(defaultFile())
-}
-
-func ValidateBilibili(p Platform) error {
-	if p.RoomID == "" {
-		return fmt.Errorf("room_id empty in %s (platforms.bilibili)", Path())
-	}
-	if p.AreaV2 == "" {
-		return fmt.Errorf("area_v2 empty in %s", Path())
-	}
-	return nil
 }
