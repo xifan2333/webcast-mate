@@ -17,9 +17,6 @@ import (
 	"time"
 )
 
-// xsecAppID is the edith/web app id for x-s signing (overridable for spectrum OBS).
-var xsecAppID = "xhs-pc-web"
-
 const (
 	xysPrefix      = "XYS_"
 	x3Prefix       = "mns0301_"
@@ -299,7 +296,7 @@ func xorTransform(src []byte) []byte {
 }
 
 // SignXS generates x-s (XYS_…) for edith APIs.
-func SignXS(method, uri string, a1 string, payload any, ts float64) (string, error) {
+func SignXS(method, uri string, a1, appID string, payload any, ts float64) (string, error) {
 	if ts == 0 {
 		ts = float64(time.Now().UnixMilli()) / 1000.0
 	}
@@ -312,7 +309,7 @@ func SignXS(method, uri string, a1 string, payload any, ts float64) (string, err
 	if strings.EqualFold(method, "POST") {
 		m = md5Hex(uri)
 	}
-	arr := buildPayloadArray(d, m, a1, xsecAppID, content, ts)
+	arr := buildPayloadArray(d, m, a1, appID, content, ts)
 	xored := xorTransform(arr)
 	if len(xored) > 144 {
 		xored = xored[:144]
@@ -320,7 +317,7 @@ func SignXS(method, uri string, a1 string, payload any, ts float64) (string, err
 	x3 := encodeX3B64(xored)
 	sigData := map[string]string{
 		"x0": "4.3.5",
-		"x1": xsecAppID,
+		"x1": appID,
 		"x2": "Windows",
 		"x3": x3Prefix + x3,
 		"x4": "object",
@@ -407,7 +404,7 @@ func generateB1(a1 string, cookies map[string]string) string {
 }
 
 // SignXSCommon generates x-s-common.
-func SignXSCommon(cookies map[string]string) string {
+func SignXSCommon(appID string, cookies map[string]string) string {
 	a1 := cookies["a1"]
 	b1 := generateB1(a1, cookies)
 	x9 := crc32JS(b1)
@@ -417,7 +414,7 @@ func SignXSCommon(cookies map[string]string) string {
 		"x0":  "1",
 		"x1":  "4.3.5",
 		"x2":  "Windows",
-		"x3":  xsecAppID,
+		"x3":  appID,
 		"x4":  "4.86.0",
 		"x5":  a1,
 		"x6":  "",
@@ -449,24 +446,24 @@ func xrayTraceID(tsMs int64) string {
 }
 
 // SignHeaders returns edith/web signature headers for method/uri.
-func SignHeaders(method, uri string, cookies map[string]string, payload any) (map[string]string, error) {
+func SignHeaders(method, uri, appID string, cookies map[string]string, payload any) (map[string]string, error) {
 	a1 := cookies["a1"]
 	if a1 == "" {
 		return nil, fmt.Errorf("missing a1 cookie")
 	}
 	// Prefer cookie's xsecappid when set (spectrum for zhibo/obs).
 	if id := cookies["xsecappid"]; id != "" {
-		xsecAppID = id
+		appID = id
 	}
 	ts := float64(time.Now().UnixMilli()) / 1000.0
-	xs, err := SignXS(method, uri, a1, payload, ts)
+	xs, err := SignXS(method, uri, a1, appID, payload, ts)
 	if err != nil {
 		return nil, err
 	}
 	tsMs := int64(ts * 1000)
 	return map[string]string{
 		"x-s":            xs,
-		"x-s-common":     SignXSCommon(cookies),
+		"x-s-common":     SignXSCommon(appID, cookies),
 		"x-t":            strconv.FormatInt(tsMs, 10),
 		"x-b3-traceid":   b3TraceID(),
 		"x-xray-traceid": xrayTraceID(tsMs),

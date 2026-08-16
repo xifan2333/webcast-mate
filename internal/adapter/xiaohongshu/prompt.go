@@ -3,18 +3,21 @@ package xiaohongshu
 import (
 	"context"
 	"os"
-	"strconv"
 
 	"github.com/charmbracelet/huh"
 	"github.com/xifan2333/webcast-mate/internal/adapter"
 	"github.com/xifan2333/webcast-mate/internal/appcfg"
+	"github.com/xifan2333/webcast-mate/internal/conv"
+	"github.com/xifan2333/webcast-mate/internal/platform"
 )
 
 // OpenConfig start-time prefs for live-helper path.
+// Prompt: Title + Area only. Cover silent from last_room_info.
 type OpenConfig struct {
 	Title      string
-	Cover      string
-	Distribute int // 1=public distribute (default), 0=trial no feed
+	Cover      string // silent from last_room_info
+	Area       string // leaf id or CategoryOtherValue
+	Distribute int    // always 1 (public)
 }
 
 func ResolveOpenConfig(ctx context.Context, cli *Client, opts adapter.StartOpts) (*OpenConfig, error) {
@@ -25,82 +28,73 @@ func ResolveOpenConfig(ctx context.Context, cli *Client, opts adapter.StartOpts)
 		return nil, err
 	}
 	cfg := &OpenConfig{Distribute: 1}
-	if p := file.GetPlatform("xiaohongshu"); p.Title != "" {
-		cfg.Title = p.Title
+	if p := file.GetPlatform(platform.XiaoHongShu); true {
+		if p.Title != "" {
+			cfg.Title = p.Title
+		}
+		if p.Area != "" {
+			cfg.Area = p.Area
+		}
 	}
-	// last room defaults
 	if t, c, err := cli.LastRoomInfo(); err == nil {
 		if cfg.Title == "" && t != "" {
 			cfg.Title = t
 		}
 		cfg.Cover = c
 	}
+	if id, err := cli.LastCategoryID(); err == nil && cfg.Area == "" {
+		cfg.Area = id
+	}
 	if t := os.Getenv("WEBCAST_MATE_XHS_TITLE"); t != "" {
 		cfg.Title = t
 	}
-	if d := os.Getenv("WEBCAST_MATE_XHS_DISTRIBUTE"); d != "" {
-		if n, err := strconv.Atoi(d); err == nil && (n == 0 || n == 1) {
-			cfg.Distribute = n
+
+	var areaOptions []huh.Option[string]
+	if list, err := cli.ListCategories(""); err == nil {
+		for _, c := range list {
+			areaOptions = append(areaOptions, huh.NewOption(c.Label(), c.ID))
 		}
+	} else {
+		areaOptions = append(areaOptions, huh.NewOption("其他 / 其他", CategoryOtherValue))
 	}
-	if opts.Yes {
-		if cfg.Title == "" {
-			cfg.Title = "直播"
-		}
-		return cfg, nil
+	if cfg.Area == "" {
+		cfg.Area = CategoryOtherValue
 	}
-	if !isInteractive() {
+
+	if opts.Yes || !conv.IsInteractive() {
 		if cfg.Title == "" {
-			cfg.Title = "直播"
+			cfg.Title = "Live"
 		}
 		return cfg, nil
 	}
 
 	title := cfg.Title
-	distLabel := "正常开播（公域分发）"
-	if cfg.Distribute == 0 {
-		distLabel = "试播（不分发）"
+	area := cfg.Area
+	fields := []huh.Field{
+		huh.NewInput().Title("Title").Value(&title),
 	}
-	dist := distLabel
-	form := huh.NewForm(huh.NewGroup(
-		huh.NewInput().
-			Title("标题").
-			Description("直播间标题").
-			Value(&title),
-		huh.NewSelect[string]().
-			Title("分发").
-			Description("distribute=1 别人能刷到；0=试播不分发").
-			Options(
-				huh.NewOption("正常开播（公域分发）", "正常开播（公域分发）"),
-				huh.NewOption("试播（不分发）", "试播（不分发）"),
-			).
-			Value(&dist),
-	)).WithTheme(huh.ThemeCharm())
-	if err := form.Run(); err != nil {
+	if len(areaOptions) > 0 {
+		fields = append(fields, huh.NewSelect[string]().
+			Title("Area").
+			Description("/ to filter").
+			Options(areaOptions...).
+			Value(&area).
+			Height(12).
+			Filtering(true))
+	}
+	if err := huh.NewForm(huh.NewGroup(fields...)).WithTheme(huh.ThemeCharm()).Run(); err != nil {
 		return nil, err
 	}
 	if title == "" {
-		title = "直播"
+		title = "Live"
 	}
 	cfg.Title = title
-	if dist == "试播（不分发）" {
-		cfg.Distribute = 0
-	} else {
-		cfg.Distribute = 1
-	}
-	p := file.GetPlatform("xiaohongshu")
+	cfg.Area = area
+	cfg.Distribute = 1
+	p := file.GetPlatform(platform.XiaoHongShu)
 	p.Title = title
-	file.Platforms["xiaohongshu"] = p
+	p.Area = area
+	file.Platforms[string(platform.XiaoHongShu)] = p
 	_ = appcfg.Save(file)
 	return cfg, nil
 }
-
-func isInteractive() bool {
-	fi, err := os.Stdin.Stat()
-	if err != nil {
-		return false
-	}
-	return (fi.Mode() & os.ModeCharDevice) != 0
-}
-
-// silence unused if cover empty

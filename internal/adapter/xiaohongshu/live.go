@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+
+	"github.com/xifan2333/webcast-mate/internal/conv"
 )
 
 // PreRoom POST redobs …/center/room/pre
@@ -80,10 +82,15 @@ func (c *Client) ReportPushInfo(roomID, pushURL string, w, h, bitrate, fps int) 
 	return nil
 }
 
-// StartRoom POST …/center/room/start  (verified body)
-func (c *Client) StartRoom(roomID, title, cover string, distribute int) error {
+// StartRoom POST …/center/room/start  (verified body).
+// categoryValue: game leaf id → categoryIds:[id]; "other"/empty → [].
+func (c *Client) StartRoom(roomID, title, cover string, distribute int, categoryValue string) error {
 	if distribute != 0 && distribute != 1 {
 		distribute = 1
+	}
+	catIDs := []any{}
+	if id := CategoryIDForStart(categoryValue); id != "" {
+		catIDs = []any{id}
 	}
 	body := map[string]any{
 		"room_id":      roomID,
@@ -97,6 +104,7 @@ func (c *Client) StartRoom(roomID, title, cover string, distribute int) error {
 		"name":         title,
 		"cover":        cover,
 		"cover_url":    cover,
+		"categoryIds":  catIDs,
 	}
 	m, err := c.do(http.MethodPost, hostRedobs,
 		"/api/sns/redobs/live/app/v1/center/room/start",
@@ -174,12 +182,12 @@ func (c *Client) LastRoomInfo() (title, cover string, err error) {
 	if ri == nil {
 		return "", "", nil
 	}
-	title = anyString(ri["room_name"])
+	title = conv.AnyString(ri["room_name"])
 	if title == "" {
-		title = anyString(ri["name"])
+		title = conv.AnyString(ri["name"])
 	}
 	if ci, _ := ri["cover_info"].(map[string]any); ci != nil {
-		cover = anyString(ci["cover_url"])
+		cover = conv.AnyString(ci["cover_url"])
 	}
 	return title, cover, nil
 }
@@ -194,10 +202,10 @@ func extractRoomPush(m map[string]any) (roomID, pushURL string) {
 		live = data
 	}
 	if ri, _ := live["room_info"].(map[string]any); ri != nil {
-		roomID = anyString(ri["room_id"])
+		roomID = conv.AnyString(ri["room_id"])
 	}
 	if roomID == "" {
-		roomID = anyString(data["room_id"])
+		roomID = conv.AnyString(data["room_id"])
 	}
 	// walk for rtmp
 	raw, _ := json.Marshal(m)

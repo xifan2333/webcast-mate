@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/xifan2333/webcast-mate/internal/adapter"
+	"github.com/xifan2333/webcast-mate/internal/conv"
 	"github.com/xifan2333/webcast-mate/internal/secrets"
 )
 
@@ -88,19 +90,69 @@ func (c *Client) LoadSecrets(f *secrets.File) {
 	if f == nil {
 		return
 	}
+	f.Normalize()
 	c.UserID = f.UserID
 	c.UserName = f.UserName
-	c.applyCookieString(f.Cookie)
+	if v := f.Headers["access-token"]; v != "" {
+		c.AccessToken = v
+	}
+	if v := f.Params["device-id"]; v != "" {
+		c.DeviceID = v
+	}
+	if v := f.Cookies["a1"]; v != "" {
+		c.A1 = v
+	}
+	if v := f.Cookies["webId"]; v != "" {
+		c.WebID = v
+	}
+	if c.extra == nil {
+		c.extra = map[string]string{}
+	}
+	for k, v := range f.Cookies {
+		if k == "a1" || k == "webId" {
+			continue
+		}
+		c.extra[k] = v
+	}
 }
 
 // SecretsFile builds the unified secrets.File for this client.
 func (c *Client) SecretsFile() *secrets.File {
-	return &secrets.File{
-		Cookie:   c.cookieString(),
+	c.ensureIdentity()
+	f := &secrets.File{
+		Version:  secrets.Version,
 		UserID:   c.UserID,
 		UserName: c.UserName,
 		LoginAt:  time.Now().UTC(),
+		Cookies:  map[string]string{},
+		Headers:  map[string]string{},
+		Params:   map[string]string{},
 	}
+	if c.AccessToken != "" {
+		f.Headers["access-token"] = c.AccessToken
+	}
+	if c.DeviceID != "" {
+		f.Params["device-id"] = c.DeviceID
+	}
+	if c.A1 != "" {
+		f.Cookies["a1"] = c.A1
+	}
+	if c.WebID != "" {
+		f.Cookies["webId"] = c.WebID
+	}
+	for k, v := range c.extra {
+		if v == "" {
+			continue
+		}
+		switch k {
+		case "access-token", "auth", "device-id", "a1", "webId", "xsecappid":
+			continue
+		default:
+			f.Cookies[k] = v
+		}
+	}
+	f.Normalize()
+	return f
 }
 
 // cookieString is what we persist in secrets.File.Cookie (open-live auth only).
@@ -140,33 +192,33 @@ func (c *Client) applyCookieString(header string) {
 	if header[0] == '{' {
 		var m map[string]any
 		if json.Unmarshal([]byte(header), &m) == nil {
-			c.AccessToken = anyString(m["access_token"])
+			c.AccessToken = conv.AnyString(m["access_token"])
 			if c.AccessToken == "" {
-				c.AccessToken = anyString(m["access-token"])
+				c.AccessToken = conv.AnyString(m["access-token"])
 			}
-			if d := anyString(m["device_id"]); d != "" {
+			if d := conv.AnyString(m["device_id"]); d != "" {
 				c.DeviceID = d
 			}
-			if a := anyString(m["a1"]); a != "" {
+			if a := conv.AnyString(m["a1"]); a != "" {
 				c.A1 = a
 			}
-			if w := anyString(m["web_id"]); w != "" {
+			if w := conv.AnyString(m["web_id"]); w != "" {
 				c.WebID = w
 			}
-			if w := anyString(m["webId"]); w != "" {
+			if w := conv.AnyString(m["webId"]); w != "" {
 				c.WebID = w
 			}
 			if ex, ok := m["cookie_extra"].(map[string]any); ok {
 				for k, v := range ex {
-					if s := anyString(v); s != "" {
+					if s := conv.AnyString(v); s != "" {
 						c.extra[k] = s
 					}
 				}
 			}
-			if uid := anyString(m["user_id"]); uid != "" && c.UserID == "" {
+			if uid := conv.AnyString(m["user_id"]); uid != "" && c.UserID == "" {
 				c.UserID = uid
 			}
-			if name := anyString(m["user_name"]); name != "" && c.UserName == "" {
+			if name := conv.AnyString(m["user_name"]); name != "" && c.UserName == "" {
 				c.UserName = name
 			}
 			return
@@ -276,11 +328,8 @@ func (c *Client) do(
 	needSign := opts.sign || strings.Contains(host, "customer.xiaohongshu")
 	var signHS map[string]string
 	if needSign {
-		prev := xsecAppID
-		xsecAppID = xsecAppLive
 		var err error
-		signHS, err = SignHeaders(method, path, c.cookieMap(), signPayload)
-		xsecAppID = prev
+		signHS, err = SignHeaders(method, path, xsecAppLive, c.cookieMap(), signPayload)
 		if err != nil {
 			return nil, fmt.Errorf("sign: %w", err)
 		}
@@ -330,7 +379,7 @@ func (c *Client) do(
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %v", adapter.ErrNetwork, err)
 	}
 	defer resp.Body.Close()
 	for _, sc := range resp.Header.Values("Set-Cookie") {
@@ -356,48 +405,10 @@ func (c *Client) do(
 	}
 	var out map[string]any
 	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, fmt.Errorf("HTTP %d json: %w (%s)", resp.StatusCode, err, truncate(string(raw), 160))
+		return nil, fmt.Errorf("HTTP %d json: %w (%s)", resp.StatusCode, err, conv.Truncate(string(raw), 160))
 	}
 	out["_http"] = float64(resp.StatusCode)
 	return out, nil
-}
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "…"
-}
-
-func anyString(v any) string {
-	switch t := v.(type) {
-	case string:
-		return t
-	case float64:
-		return fmt.Sprintf("%.0f", t)
-	case json.Number:
-		return t.String()
-	default:
-		if v == nil {
-			return ""
-		}
-		return fmt.Sprint(v)
-	}
-}
-
-func anyInt(v any) int {
-	switch t := v.(type) {
-	case float64:
-		return int(t)
-	case int:
-		return t
-	case string:
-		var n int
-		fmt.Sscanf(t, "%d", &n)
-		return n
-	default:
-		return 0
-	}
 }
 
 func bizOK(m map[string]any) bool {
@@ -407,10 +418,10 @@ func bizOK(m map[string]any) bool {
 	if s, ok := m["success"].(bool); ok && s {
 		return true
 	}
-	if m["code"] != nil && anyInt(m["code"]) == 0 {
+	if m["code"] != nil && conv.AnyInt(m["code"]) == 0 {
 		return true
 	}
-	if m["result"] != nil && anyInt(m["result"]) == 0 {
+	if m["result"] != nil && conv.AnyInt(m["result"]) == 0 {
 		return true
 	}
 	return false

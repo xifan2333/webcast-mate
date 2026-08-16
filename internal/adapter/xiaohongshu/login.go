@@ -6,25 +6,22 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
-	qrcode "github.com/skip2/go-qrcode"
+	"github.com/xifan2333/webcast-mate/internal/conv"
+	"github.com/xifan2333/webcast-mate/internal/platform"
 	"github.com/xifan2333/webcast-mate/internal/secrets"
 	"github.com/xifan2333/webcast-mate/internal/termimg"
 )
 
 // EnsureLogin loads secrets or runs CAS QR login (same shape as bilibili/douyin).
 func (c *Client) EnsureLogin(ctx context.Context) (*secrets.File, error) {
-	if s, err := secrets.Load("xiaohongshu"); err == nil && s.Cookie != "" {
+	if s, err := secrets.Load(platform.XiaoHongShu); err == nil && s.HasAuth() {
 		c.LoadSecrets(s)
 		if ok, _ := c.CheckLogin(); ok {
 			return s, nil
 		}
-		fmt.Fprintln(os.Stderr, "xiaohongshu: saved session invalid, re-login")
 	}
 	return c.loginQR(ctx)
 }
@@ -57,20 +54,18 @@ func (c *Client) loginQR(ctx context.Context) (*secrets.File, error) {
 	if data == nil {
 		return nil, fmt.Errorf("qr create no data: %v", created)
 	}
-	qid := anyString(data["id"])
-	qrURL := anyString(data["url"])
+	qid := conv.AnyString(data["id"])
+	qrURL := conv.AnyString(data["url"])
 	if qid == "" {
 		return nil, fmt.Errorf("qr create missing id: %v", created)
 	}
 
-	fmt.Fprintln(os.Stderr, "xiaohongshu: scan QR with 小红书 App (live-helper CAS)")
 	if qrURL != "" {
-		fmt.Fprintln(os.Stderr, qrURL)
-		printQR(qrURL)
+		close := printQR(qrURL)
+		defer close()
 	}
 
 	deadline := time.Now().Add(3 * time.Minute)
-	last := -999
 	var ticket string
 	for {
 		if err := ctx.Err(); err != nil {
@@ -85,7 +80,6 @@ func (c *Client) loginQR(ctx context.Context) (*secrets.File, error) {
 		st, err := c.do(http.MethodGet, hostCustomer, "/api/cas/customer/pc/qr-code", nil, q,
 			doOpts{sign: true, originRobs: true})
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "xiaohongshu: poll err: %v\n", err)
 			sleep(ctx, time.Second)
 			continue
 		}
@@ -94,21 +88,7 @@ func (c *Client) loginQR(ctx context.Context) (*secrets.File, error) {
 			sleep(ctx, time.Second)
 			continue
 		}
-		status := anyInt(d["status"])
-		if status != last {
-			last = status
-			switch status {
-			case 2:
-				fmt.Fprintln(os.Stderr, "xiaohongshu: waiting / scanned…")
-			case 3:
-				fmt.Fprintln(os.Stderr, "xiaohongshu: confirming…")
-			case 1:
-				fmt.Fprintln(os.Stderr, "xiaohongshu: confirmed")
-			default:
-				fmt.Fprintf(os.Stderr, "xiaohongshu: status=%d\n", status)
-			}
-		}
-		if t := anyString(d["ticket"]); t != "" {
+		if t := conv.AnyString(d["ticket"]); t != "" {
 			ticket = t
 			break
 		}
@@ -134,7 +114,6 @@ func (c *Client) loginQR(ctx context.Context) (*secrets.File, error) {
 	if ticket == "" {
 		return nil, ErrQRTimeout
 	}
-	fmt.Fprintln(os.Stderr, "xiaohongshu: ticket ok, exchanging AT…")
 
 	loginBody := map[string]any{"ticket": ticket, "service": serviceRobs}
 	lr, err := c.do(http.MethodPost, hostRobs, "/api/sns/login", loginBody, nil,
@@ -149,22 +128,18 @@ func (c *Client) loginQR(ctx context.Context) (*secrets.File, error) {
 	if ld == nil {
 		return nil, fmt.Errorf("login no data: %v", lr)
 	}
-	at := anyString(ld["access_token"])
+	at := conv.AnyString(ld["access_token"])
 	if at == "" {
 		return nil, fmt.Errorf("login no access_token: %v", lr)
 	}
 	c.AccessToken = at
-	c.UserID = anyString(ld["user_id"])
-	c.UserName = anyString(ld["nickname"])
+	c.UserID = conv.AnyString(ld["user_id"])
+	c.UserName = conv.AnyString(ld["nickname"])
 
 	s := c.SecretsFile()
-	if err := secrets.Save("xiaohongshu", s); err != nil {
+	if err := secrets.Save(platform.XiaoHongShu, s); err != nil {
 		return nil, err
 	}
-	if c.UserName != "" {
-		fmt.Fprintf(os.Stderr, "xiaohongshu: logged in as %s\n", c.UserName)
-	}
-	fmt.Fprintln(os.Stderr, "xiaohongshu: CAS login ok")
 	return s, nil
 }
 
@@ -175,32 +150,6 @@ func sleep(ctx context.Context, d time.Duration) {
 	}
 }
 
-func printQR(content string) {
-	if content == "" {
-		return
-	}
-	q, err := qrcode.New(content, qrcode.Medium)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "xiaohongshu: qr: %v\n", err)
-		return
-	}
-	if png, err := q.PNG(320); err == nil {
-		dir := filepath.Join(os.TempDir(), "webcast-mate")
-		_ = os.MkdirAll(dir, 0o755)
-		path := filepath.Join(dir, "xhs-cas-qr.png")
-		if err := os.WriteFile(path, png, 0o600); err == nil {
-			fmt.Fprintf(os.Stderr, "xiaohongshu: QR image %s\n", path)
-			for _, bin := range []string{"xdg-open", "imv", "imv-wayland", "feh"} {
-				if p, e := exec.LookPath(bin); e == nil {
-					cmd := exec.Command(p, path)
-					_ = cmd.Start()
-					break
-				}
-			}
-		}
-		if termimg.SupportsKitty() && termimg.WriteKittyPNG(os.Stderr, png) == nil {
-			return
-		}
-	}
-	fmt.Fprint(os.Stderr, q.ToSmallString(false))
+func printQR(content string) func() {
+	return termimg.ShowQR(nil, content)
 }
