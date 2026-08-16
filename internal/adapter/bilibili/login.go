@@ -10,6 +10,7 @@ import (
 
 	qrcode "github.com/skip2/go-qrcode"
 	"github.com/xifan2333/webcast-mate/internal/session"
+	"github.com/xifan2333/webcast-mate/internal/termimg"
 )
 
 type Session struct {
@@ -190,7 +191,8 @@ func (c *Client) loginQR(ctx context.Context) (*Session, error) {
 	}
 }
 
-// printQR prints a compact terminal QR (go-qrcode, no quiet-zone border).
+// printQR shows a scannable QR on stderr.
+// Prefer Kitty graphics protocol (true PNG pixels) when supported; else character art.
 func printQR(content, filename string) {
 	_ = filename
 	if content == "" {
@@ -201,6 +203,12 @@ func printQR(content, filename string) {
 		fmt.Fprintf(os.Stderr, "bilibili: qr: %v\n", err)
 		return
 	}
-	q.DisableBorder = true // smaller in terminal
+	// quiet zone helps phone cameras; keep library default border
+	if termimg.SupportsKitty() {
+		png, err := q.PNG(280)
+		if err == nil && termimg.WriteKittyPNG(os.Stderr, png) == nil {
+			return
+		}
+	}
 	fmt.Fprint(os.Stderr, q.ToSmallString(false))
 }
