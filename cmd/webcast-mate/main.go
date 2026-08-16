@@ -98,7 +98,7 @@ CONFIG
 
 STATUS
   bilibili: QR login + huh prompts (title/area/cover) + start/stop; -y skips prompts
-  xiaohongshu: QR (+ SMS sid for live) + start/stop/status
+  xiaohongshu: web QR + phone OBS 6-digit code → push_url
   douyin: stub
 `, configRootDisplay())
 }

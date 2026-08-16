@@ -2,7 +2,6 @@ package xiaohongshu
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -13,7 +12,7 @@ import (
 	"github.com/xifan2333/webcast-mate/internal/platform"
 )
 
-// Adapter implements adapter.Adapter for xiaohongshu.
+// Adapter: web QR login + phone OBS 6-digit code → push_url.
 type Adapter struct{}
 
 func New() *Adapter { return &Adapter{} }
@@ -26,43 +25,22 @@ func (a *Adapter) Start(ctx context.Context, opts adapter.StartOpts) (*adapter.S
 	if err != nil {
 		return nil, err
 	}
-	// Live APIs need robs sid
-	if cli.Sid == "" {
-		if isInteractive() {
-			fmt.Fprintln(os.Stderr, "xiaohongshu: need SMS login for live open")
-			if s2, err := cli.loginSMS(ctx); err != nil {
-				return nil, fmt.Errorf("%w: %v", ErrNeedSID, err)
-			} else {
-				sec = s2
-			}
-		} else {
-			return nil, fmt.Errorf("%w: run without -y to SMS login, or put sid in secrets", ErrNeedSID)
-		}
-	}
 
 	ocfg, err := ResolveOpenConfig(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
 
-	pre, err := cli.LivePre()
+	obs, err := cli.FetchObsPushURL(ocfg.Code)
 	if err != nil {
 		return nil, err
 	}
-	name := ocfg.Title
-	if name == "" {
-		name = pre.Name
-	}
-	cover := ocfg.Cover
-	if cover == "" {
-		cover = pre.Cover
-	}
-	if err := cli.LiveStart(pre.RoomID, name, cover); err != nil {
-		return nil, err
-	}
-	server, key := SplitPushURL(pre.URL.PushURL)
+	server, key := obs.Server, obs.Key
 	if server == "" {
-		server = pre.URL.PushURL
+		server, key = SplitPushURL(obs.PushURL)
+	}
+	if server == "" {
+		server = obs.PushURL
 	}
 
 	file, _ := appcfg.Load()
@@ -70,8 +48,12 @@ func (a *Adapter) Start(ctx context.Context, opts adapter.StartOpts) (*adapter.S
 	if file != nil {
 		vbr, abr = file.Bitrate("xiaohongshu")
 	}
+	roomID := obs.RoomID
+	if roomID == "" {
+		roomID = ocfg.Code // fallback identifier
+	}
 	if err := live.Upsert("xiaohongshu", live.Target{
-		RoomID:       pre.RoomID,
+		RoomID:       roomID,
 		Server:       server,
 		Key:          key,
 		VideoBitrate: vbr,
@@ -83,20 +65,16 @@ func (a *Adapter) Start(ctx context.Context, opts adapter.StartOpts) (*adapter.S
 
 	cookie := ""
 	if sec != nil {
-		// expose sid as cookie field for pipelines that need auth string
-		if sec.Sid != "" {
-			cookie = "sid=" + sec.Sid
-			if sec.Cookie != "" {
-				cookie = sec.Cookie + "; " + cookie
-			}
-		} else {
-			cookie = sec.Cookie
-		}
+		cookie = sec.Cookie
+	} else {
+		cookie = cli.cookieHeader()
 	}
+
+	fmt.Fprintln(os.Stderr, "xiaohongshu: got push_url; start streaming, then tap 进入直播 on phone if needed")
 
 	return &adapter.StartResult{
 		Platform: string(platform.XiaoHongShu),
-		RoomID:   pre.RoomID,
+		RoomID:   roomID,
 		Cookie:   cookie,
 		Server:   server,
 		Key:      key,
@@ -105,26 +83,16 @@ func (a *Adapter) Start(ctx context.Context, opts adapter.StartOpts) (*adapter.S
 
 func (a *Adapter) Stop(ctx context.Context) (*adapter.StopResult, error) {
 	_ = ctx
+	// Web OBS path: stop is primarily on the phone; clear local live.json.
 	res := &adapter.StopResult{
 		Platform: string(platform.XiaoHongShu),
 		Status:   "stopped",
 	}
-	roomID := ""
 	if t, ok := live.Get("xiaohongshu"); ok {
-		roomID = t.RoomID
-	}
-	res.RoomID = roomID
-
-	cli := NewClient()
-	if s, err := loadSecret(); err == nil {
-		cli.applySecret(s)
-	}
-	if roomID != "" && cli.Sid != "" {
-		if err := cli.LiveStop(roomID); err != nil {
-			fmt.Fprintf(os.Stderr, "xiaohongshu: stop: %v\n", err)
-		}
+		res.RoomID = t.RoomID
 	}
 	_ = live.Remove("xiaohongshu")
+	fmt.Fprintln(os.Stderr, "xiaohongshu: cleared local live.json (end live on phone if still on air)")
 	return res, nil
 }
 
@@ -134,37 +102,30 @@ func (a *Adapter) Status(ctx context.Context) (*adapter.StatusResult, error) {
 		Platform: string(platform.XiaoHongShu),
 		Status:   "idle",
 	}
-	if t, ok := live.Get("xiaohongshu"); ok {
+	if t, ok := live.Get("xiaohongshu"); ok && (t.Server != "" || t.Key != "") {
 		out.RoomID = t.RoomID
 		out.Server = t.Server
 		out.Key = t.Key
+		out.Status = "live" // local session active; remote stop is phone-side
 	}
+	if s, err := loadSecret(); err == nil {
+		out.Cookie = s.Cookie
+	}
+	// best-effort remote: living_push_url
 	cli := NewClient()
 	if s, err := loadSecret(); err == nil {
 		cli.applySecret(s)
-		if s.Sid != "" {
-			out.Cookie = "sid=" + s.Sid
-			if s.Cookie != "" {
-				out.Cookie = s.Cookie + "; " + out.Cookie
+	}
+	if cli.WebSession != "" {
+		if obs, err := cli.LivingPushURL(); err == nil && obs != nil && obs.PushURL != "" {
+			out.Status = "live"
+			if obs.RoomID != "" {
+				out.RoomID = obs.RoomID
 			}
-		} else {
-			out.Cookie = s.Cookie
+			if out.Server == "" {
+				out.Server, out.Key = SplitPushURL(obs.PushURL)
+			}
 		}
-	}
-	if cli.Sid == "" {
-		return out, nil
-	}
-	living, roomID, err := cli.CheckLive()
-	if err != nil && !errors.Is(err, ErrNeedSID) {
-		return nil, err
-	}
-	if roomID != "" {
-		out.RoomID = roomID
-	}
-	if living {
-		out.Status = "live"
-	} else {
-		out.Status = "idle"
 	}
 	return out, nil
 }

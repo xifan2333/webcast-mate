@@ -3,127 +3,149 @@ package xiaohongshu
 import (
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"net/url"
 	"strings"
 )
 
-type preData struct {
-	RoomID string `json:"room_id"`
-	Name   string `json:"name"`
-	Cover  string `json:"cover"`
-	URL    struct {
-		PushURL string `json:"push_url"`
-	} `json:"url"`
+// ObsPush is response from /web_api/sns/v1/live/obs/push_url?code=
+type ObsPush struct {
+	RoomID  string
+	PushURL string
+	Server  string
+	Key     string
 }
 
-// LivePre returns room_id + push_url (needs robs sid).
-func (c *Client) LivePre() (*preData, error) {
-	if c.Sid == "" {
-		return nil, ErrNeedSID
+// FetchObsPushURL exchanges the phone 6-digit OBS code for RTMP push URL.
+// Requires logged-in web_session (QR). Host: www.xiaohongshu.com, appid spectrum.
+func (c *Client) FetchObsPushURL(code string) (*ObsPush, error) {
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return nil, fmt.Errorf("empty obs code")
 	}
-	path := "/api/sns/live/pre?" + pcQS
-	b, err := c.doRobs(http.MethodGet, path, c.Sid, nil)
+	uri := "/web_api/sns/v1/live/obs/push_url"
+	q := url.Values{}
+	q.Set("code", code)
+	b, err := c.doSpectrumGET(uri, q)
 	if err != nil {
 		return nil, err
 	}
 	var out struct {
-		Result int     `json:"result"`
-		Msg    string  `json:"msg"`
-		Data   preData `json:"data"`
-	}
-	if err := json.Unmarshal(b, &out); err != nil {
-		return nil, err
-	}
-	if out.Result != 0 {
-		return nil, fmt.Errorf("live/pre: %s (%d)", out.Msg, out.Result)
-	}
-	if out.Data.RoomID == "" || out.Data.URL.PushURL == "" {
-		return nil, fmt.Errorf("live/pre: empty room or push_url")
-	}
-	return &out.Data, nil
-}
-
-// LiveStart starts the room.
-func (c *Client) LiveStart(roomID, name, cover string) error {
-	if c.Sid == "" {
-		return ErrNeedSID
-	}
-	path := "/api/sns/live/" + url.PathEscape(roomID) + "/start?" + pcQS
-	body := map[string]any{
-		"name":          name,
-		"notice":        "",
-		"is_distribute": true,
-		"cover":         cover,
-		"lesson_id":     0,
-	}
-	b, err := c.doRobs(http.MethodPost, path, c.Sid, body)
-	if err != nil {
-		return err
-	}
-	var out struct {
-		Result int    `json:"result"`
-		Msg    string `json:"msg"`
-	}
-	if err := json.Unmarshal(b, &out); err != nil {
-		return err
-	}
-	if out.Result != 0 {
-		return fmt.Errorf("live/start: %s (%d)", out.Msg, out.Result)
-	}
-	return nil
-}
-
-// LiveStop stops the room.
-func (c *Client) LiveStop(roomID string) error {
-	if c.Sid == "" || roomID == "" {
-		return nil
-	}
-	path := "/api/sns/live/" + url.PathEscape(roomID) + "/stop"
-	b, err := c.doRobs(http.MethodPost, path, c.Sid, map[string]any{})
-	if err != nil {
-		return err
-	}
-	var out struct {
-		Result int    `json:"result"`
-		Msg    string `json:"msg"`
-	}
-	_ = json.Unmarshal(b, &out)
-	if out.Result != 0 {
-		return fmt.Errorf("live/stop: %s (%d)", out.Msg, out.Result)
-	}
-	return nil
-}
-
-// CheckLive returns whether currently live (best-effort).
-func (c *Client) CheckLive() (live bool, roomID string, err error) {
-	if c.Sid == "" {
-		return false, "", ErrNeedSID
-	}
-	b, err := c.doRobs(http.MethodGet, "/api/sns/live/check_live", c.Sid, nil)
-	if err != nil {
-		return false, "", err
-	}
-	var out struct {
-		Result int    `json:"result"`
-		Msg    string `json:"msg"`
-		Data   struct {
-			// field names vary; try common ones
-			IsLive bool   `json:"is_live"`
-			Living bool   `json:"living"`
-			RoomID string `json:"room_id"`
-			Status int    `json:"status"`
+		Code    int    `json:"code"`
+		Success bool   `json:"success"`
+		Msg     string `json:"msg"`
+		Data    struct {
+			// field names may vary — collect common ones
+			PushURL string `json:"push_url"`
+			URL     string `json:"url"`
+			RoomID  any    `json:"room_id"`
+			// nested
+			Stream struct {
+				PushURL string `json:"push_url"`
+			} `json:"stream"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(b, &out); err != nil {
-		return false, "", err
+		return nil, err
 	}
-	if out.Result != 0 {
-		// not logged in etc.
-		return false, "", nil
+	if out.Code != 0 && !out.Success {
+		return nil, fmt.Errorf("push_url: %s (%d)", out.Msg, out.Code)
 	}
-	live = out.Data.IsLive || out.Data.Living || out.Data.Status == 1
-	return live, out.Data.RoomID, nil
+	// also parse loosely
+	var raw map[string]any
+	_ = json.Unmarshal(b, &raw)
+	push := out.Data.PushURL
+	if push == "" {
+		push = out.Data.URL
+	}
+	if push == "" {
+		push = out.Data.Stream.PushURL
+	}
+	if push == "" {
+		if data, ok := raw["data"].(map[string]any); ok {
+			for _, k := range []string{"push_url", "url", "rtmp_url", "pushUrl"} {
+				if s, ok := data[k].(string); ok && strings.Contains(s, "rtmp") {
+					push = s
+					break
+				}
+			}
+			// data.url might be object
+			if push == "" {
+				if u, ok := data["url"].(map[string]any); ok {
+					if s, ok := u["push_url"].(string); ok {
+						push = s
+					}
+				}
+			}
+		}
+	}
+	if push == "" {
+		return nil, fmt.Errorf("push_url: no rtmp in response: %s", truncate(string(b), 300))
+	}
+	roomID := fmt.Sprint(out.Data.RoomID)
+	if roomID == "" || roomID == "<nil>" {
+		if data, ok := raw["data"].(map[string]any); ok {
+			if r, ok := data["room_id"]; ok {
+				roomID = fmt.Sprint(r)
+			}
+		}
+	}
+	server, key := SplitPushURL(push)
+	return &ObsPush{RoomID: roomID, PushURL: push, Server: server, Key: key}, nil
+}
+
+// LivingPushURL tries GET living_push_url when already live.
+func (c *Client) LivingPushURL() (*ObsPush, error) {
+	uri := "/web_api/sns/v1/live/obs/living_push_url"
+	b, err := c.doSpectrumGET(uri, nil)
+	if err != nil {
+		return nil, err
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return nil, err
+	}
+	code, _ := raw["code"].(float64)
+	if code != 0 {
+		msg, _ := raw["msg"].(string)
+		return nil, fmt.Errorf("living_push_url: %s (%v)", msg, code)
+	}
+	// reuse parser via wrapping
+	return parsePushPayload(b)
+}
+
+func parsePushPayload(b []byte) (*ObsPush, error) {
+	var c Client
+	// fake by reusing FetchObsPushURL parser — duplicate minimal
+	var raw map[string]any
+	_ = json.Unmarshal(b, &raw)
+	data, _ := raw["data"].(map[string]any)
+	if data == nil {
+		return nil, fmt.Errorf("no data: %s", truncate(string(b), 200))
+	}
+	push := ""
+	for _, k := range []string{"push_url", "url", "rtmp_url"} {
+		if s, ok := data[k].(string); ok && strings.Contains(s, "rtmp") {
+			push = s
+			break
+		}
+	}
+	if push == "" {
+		if u, ok := data["url"].(map[string]any); ok {
+			if s, ok := u["push_url"].(string); ok {
+				push = s
+			}
+		}
+	}
+	if push == "" {
+		return nil, fmt.Errorf("no push_url: %s", truncate(string(b), 200))
+	}
+	roomID := ""
+	if r, ok := data["room_id"]; ok {
+		roomID = fmt.Sprint(r)
+	}
+	server, key := SplitPushURL(push)
+	_ = c
+	return &ObsPush{RoomID: roomID, PushURL: push, Server: server, Key: key}, nil
 }
 
 // SplitPushURL splits rtmp://host/app/key?query into server + key.
@@ -132,32 +154,25 @@ func SplitPushURL(push string) (server, key string) {
 	if push == "" {
 		return "", ""
 	}
-	// rtmp://live-push.xhscdn.com/live/XXXX?auth=...
-	const prefix = "rtmp://"
-	if !strings.HasPrefix(push, prefix) && !strings.HasPrefix(push, "rtmps://") {
-		return push, ""
-	}
-	// find path after host
 	rest := push
-	if i := strings.Index(rest, "://"); i >= 0 {
-		rest = rest[i+3:]
+	scheme := "rtmp://"
+	if strings.HasPrefix(rest, "rtmps://") {
+		scheme = "rtmps://"
+		rest = rest[len("rtmps://"):]
+	} else if strings.HasPrefix(rest, "rtmp://") {
+		rest = rest[len("rtmp://"):]
+	} else {
+		return push, ""
 	}
 	slash := strings.Index(rest, "/")
 	if slash < 0 {
-		return push, ""
+		return scheme + rest, ""
 	}
 	host := rest[:slash]
-	pathq := rest[slash+1:] // live/KEY?q
-	scheme := "rtmp://"
-	if strings.HasPrefix(push, "rtmps://") {
-		scheme = "rtmps://"
-	}
-	// first path segment is app name (live)
+	pathq := rest[slash+1:]
 	app, keyPart, ok := strings.Cut(pathq, "/")
 	if !ok {
 		return scheme + host + "/" + pathq, ""
 	}
-	server = scheme + host + "/" + app
-	key = keyPart
-	return server, key
+	return scheme + host + "/" + app, keyPart
 }

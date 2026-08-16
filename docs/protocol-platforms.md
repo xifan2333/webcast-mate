@@ -374,7 +374,16 @@ audio_bitrate = 128
 4. server 固定 `rtmp://live-push.xhscdn.com/live`，密钥页上展示  
 5. 手机点「进入直播」；**每次关播再开都要新 6 位码**
 
-实现优先级：**3.A robs 短信** 一条链做完；3.B 作备用。
+**webcast-mate 主路径（3.B）：**
+```
+web QR login → secrets web_session
+  → 用户输入 6 位码
+  → GET /web_api/sns/v1/live/obs/push_url?code=XXXXXX  (xsecappid=spectrum, x-s)
+  → live.json + stdout {server,key,room_id,cookie}
+```
+非交互：`WEBCAST_MATE_XHS_CODE=254966 webcast-mate start xiaohongshu -y`
+
+实现优先级：**3.B 网页 OBS（Web 扫码 + 手机 6 位码 → push_url）** 为主；3.A robs 短信作备用。
 
 ### 3.C 状态机（3.A）
 

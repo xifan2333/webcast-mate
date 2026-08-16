@@ -17,8 +17,10 @@ import (
 	"time"
 )
 
+// xsecAppID is the edith/web app id for x-s signing (overridable for spectrum OBS).
+var xsecAppID = "xhs-pc-web"
+
 const (
-	xsecAppID      = "xhs-pc-web"
 	xysPrefix      = "XYS_"
 	x3Prefix       = "mns0301_"
 	b1SecretKey    = "xhswebmplfbt"
@@ -446,11 +448,15 @@ func xrayTraceID(tsMs int64) string {
 	return part1 + randomHex(16)
 }
 
-// SignHeaders returns edith signature headers for method/uri.
+// SignHeaders returns edith/web signature headers for method/uri.
 func SignHeaders(method, uri string, cookies map[string]string, payload any) (map[string]string, error) {
 	a1 := cookies["a1"]
 	if a1 == "" {
 		return nil, fmt.Errorf("missing a1 cookie")
+	}
+	// Prefer cookie's xsecappid when set (spectrum for zhibo/obs).
+	if id := cookies["xsecappid"]; id != "" {
+		xsecAppID = id
 	}
 	ts := float64(time.Now().UnixMilli()) / 1000.0
 	xs, err := SignXS(method, uri, a1, payload, ts)
