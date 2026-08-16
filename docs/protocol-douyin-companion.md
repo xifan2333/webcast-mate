@@ -910,9 +910,19 @@ window.byted_acrawler.frontierSign({ "X-MS-STUB": stub })
 | 项 | 状态 |
 |----|------|
 | `log_encrypt.py` | 与 Node 同算法 **byte-identical**；sticky `device_register` 返回伴侣同 did/iid |
-| `abogus_pure.py` | 按公开 1.0.1.19 结构落地的**纯算**；须从 **1.0.1.20** VMP 重提盐/表/字段序后与 chrome oracle 对齐 |
-| eval 整包 bdms + jsdom/goja 假环境 | **非目标**（用户要求算法单文件化，不是补环境） |
-| chrome + bdms | 仅作 oracle / 过渡 |
+| `abogus_pure.py` | **纯算结构已通**（1.0.1.20）：VMP 池提出盐 `dhzx`、s2/s3 表、掩码/RC4；clean payload 93B 字段部分锁定；输出 **184** 字符；`decode` 可还原 fullscreen screen 串 |
+| eval 整包 bdms + jsdom/goja 假环境 | **非目标** |
+| chrome + bdms | oracle / 对照 |
+| `bdms_vm.py` | VMP 解释器实验（宿主 API 未齐） |
 
-a_bogus 输入（纯算与 oracle 共通）：`query`（无 `?`，空格为 `+`）+ `body` + `User-Agent`。  
-输出：~160–200 字符自定义 Base64；含时间/随机，同输入每次可不同。
+**a_bogus 链路（已验证骨架）：**
+```
+query/body/ua
+  → SM3×2(url/body+"dhzx")；UA→s3_b64→SM3
+  → head[50] + "{screen}{(ts+3)&255},"
+  → garble3to4 → RC4var(0xD3) → prefix4 + ver8+garbled → b64(s2)
+```
+
+**hash 槽（clean）：** url→`[9]=h18,[12]=h3,[15]=h9`；body→`[21]=h4,[33]=h10,[38]=h19`；ua→`[29]=h21`；`[28]=timeDiff`；`[43]=41`。
+
+**仍开放：** head 剩余指纹字节；ver/prefix 的 garble2 公式（现随机）；**服务端 create/ping 放行**实测。
