@@ -160,12 +160,15 @@ func (c *Client) loginQR(ctx context.Context) (*secrets.File, error) {
 		return nil, fmt.Errorf("ttwid: %w", err)
 	}
 
-	token, qrPNG, err := c.getQRCode()
+	token, qrURL, err := c.getQRCode()
 	if err != nil {
 		return nil, err
 	}
-	fmt.Fprintln(os.Stderr, "douyin: scan QR with Douyin app (streamingtool desktop session)")
-	printQRBytes(qrPNG)
+	fmt.Fprintln(os.Stderr, "douyin: scan QR with Douyin app")
+	if qrURL != "" {
+		fmt.Fprintln(os.Stderr, qrURL)
+	}
+	printQR(qrURL)
 
 	deadline := time.Now().Add(3 * time.Minute)
 	last := ""
@@ -247,7 +250,8 @@ func (c *Client) loginQR(ctx context.Context) (*secrets.File, error) {
 	}
 }
 
-func (c *Client) getQRCode() (token string, png []byte, err error) {
+// getQRCode returns poll token and a URL suitable for terminal QR (same as bili/xhs).
+func (c *Client) getQRCode() (token, qrURL string, err error) {
 	q := c.sdkParams()
 	q.Set("next", hostStreaming)
 	q.Set("need_logo", "false")
@@ -255,36 +259,46 @@ func (c *Client) getQRCode() (token string, png []byte, err error) {
 	q.Set("is_new_login", "1")
 	m, err := c.getJSON(hostStreaming+"/passport/web/get_qrcode/?"+q.Encode(), nil)
 	if err != nil {
-		return "", nil, err
+		return "", "", err
 	}
 	data := mapData(m)
 	if data == nil {
-		return "", nil, fmt.Errorf("get_qrcode: %v", m)
+		return "", "", fmt.Errorf("get_qrcode: %v", m)
 	}
 	if ec := anyString(data["error_code"]); ec != "" && ec != "0" {
-		return "", nil, fmt.Errorf("get_qrcode error_code=%s msg=%v", ec, data["description"])
+		return "", "", fmt.Errorf("get_qrcode error_code=%s msg=%v", ec, data["description"])
 	}
 	token = anyString(data["token"])
-	b64 := anyString(data["qrcode"])
-	if token == "" || b64 == "" {
-		return "", nil, fmt.Errorf("get_qrcode missing token/qrcode")
+	if token == "" {
+		return "", "", fmt.Errorf("get_qrcode missing token")
 	}
-	// qrcode may be data-url or raw b64
-	if i := indexOf(b64, ","); i >= 0 && hasPrefix(b64, "data:") {
-		b64 = b64[i+1:]
-	}
-	png, err = base64.StdEncoding.DecodeString(b64)
-	if err != nil {
-		// try raw url encoding
-		png, err = base64.RawStdEncoding.DecodeString(b64)
-		if err != nil {
-			return token, nil, fmt.Errorf("qrcode b64: %w", err)
+	// Prefer scan URL for go-qrcode (same display path as bilibili/xhs).
+	for _, k := range []string{"qrcode_index_url", "qrcode_url", "url"} {
+		if u := anyString(data[k]); u != "" {
+			qrURL = u
+			break
 		}
 	}
-	// also write cache for debugging
-	_ = os.MkdirAll(filepath.Join(os.TempDir(), "webcast-mate"), 0o755)
-	_ = os.WriteFile(filepath.Join(os.TempDir(), "webcast-mate", "douyin-qr.png"), png, 0o600)
-	return token, png, nil
+	if qrURL == "" {
+		// API often only returns PNG base64; decode and show via Kitty, else write file.
+		b64 := anyString(data["qrcode"])
+		if b64 == "" {
+			return "", "", fmt.Errorf("get_qrcode missing qrcode")
+		}
+		if i := indexOf(b64, ","); i >= 0 && hasPrefix(b64, "data:") {
+			b64 = b64[i+1:]
+		}
+		png, decErr := base64.StdEncoding.DecodeString(b64)
+		if decErr != nil {
+			png, decErr = base64.RawStdEncoding.DecodeString(b64)
+		}
+		if decErr != nil {
+			return token, "", fmt.Errorf("qrcode b64: %w", decErr)
+		}
+		printQRPNG(png)
+		return token, "", nil
+	}
+	return token, qrURL, nil
 }
 
 func (c *Client) checkQR(token string) (status, redirect string, errCode int, err error) {
@@ -340,19 +354,37 @@ func sleep(ctx context.Context, d time.Duration) {
 	}
 }
 
-func printQRBytes(png []byte) {
+// printQR matches bilibili/xiaohongshu: Kitty graphics PNG, else ToSmallString.
+func printQR(content string) {
+	if content == "" {
+		return
+	}
+	q, err := qrcode.New(content, qrcode.Medium)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "douyin: qr: %v\n", err)
+		return
+	}
+	if termimg.SupportsKitty() {
+		png, err := q.PNG(280)
+		if err == nil && termimg.WriteKittyPNG(os.Stderr, png) == nil {
+			return
+		}
+	}
+	fmt.Fprint(os.Stderr, q.ToSmallString(false))
+}
+
+// printQRPNG when API only returns a PNG (no index URL).
+func printQRPNG(png []byte) {
 	if len(png) == 0 {
 		return
 	}
 	if termimg.SupportsKitty() && termimg.WriteKittyPNG(os.Stderr, png) == nil {
 		return
 	}
-	// fallback: try decode as QR content unknown — write path
+	_ = os.MkdirAll(filepath.Join(os.TempDir(), "webcast-mate"), 0o755)
 	path := filepath.Join(os.TempDir(), "webcast-mate", "douyin-qr.png")
+	_ = os.WriteFile(path, png, 0o600)
 	fmt.Fprintf(os.Stderr, "douyin: QR image %s\n", path)
-	// also try go-qrcode from nothing — if png is image, user opens file
-	// secondary: if env has display tools — skip
-	_ = qrcode.Medium
 }
 
 func indexOf(s, sub string) int {
