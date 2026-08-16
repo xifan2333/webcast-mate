@@ -900,5 +900,19 @@ window.byted_acrawler.frontierSign({ "X-MS-STUB": stub })
 | **a_bogus（登录+开播）** | **高** | 仅知挂载点与 include，算法在 glue 二进制/远程脚本 |
 | x-secsdk-csrf | 中 | secsdk 与 csrf cookie |
 
-推荐研发序：  
-**logEncrypt 设备注册 → 复用已有 session 打通 create/ping → 再攻坚登录 a_bogus**（开播 a_bogus 与现 adapter 的 bdms 路径可合并）。
+推荐研发序（已按验证调整）：  
+1. **a_bogus 纯算突破**（主路径；禁止「整份 bdms.js + 补 DOM」当产品形态）  
+2. **logEncrypt 设备注册**（已在 `~/douyin-live` 验证：加密正确；sticky did 注册回显）  
+3. 复用 session 打通 create/ping → 登录扫码
+
+### 10.8 验证台结论（`~/douyin-live`，Python 先于 Go）
+
+| 项 | 状态 |
+|----|------|
+| `log_encrypt.py` | 与 Node 同算法 **byte-identical**；sticky `device_register` 返回伴侣同 did/iid |
+| `abogus_pure.py` | 按公开 1.0.1.19 结构落地的**纯算**；须从 **1.0.1.20** VMP 重提盐/表/字段序后与 chrome oracle 对齐 |
+| eval 整包 bdms + jsdom/goja 假环境 | **非目标**（用户要求算法单文件化，不是补环境） |
+| chrome + bdms | 仅作 oracle / 过渡 |
+
+a_bogus 输入（纯算与 oracle 共通）：`query`（无 `?`，空格为 `+`）+ `body` + `User-Agent`。  
+输出：~160–200 字符自定义 Base64；含时间/随机，同输入每次可不同。
