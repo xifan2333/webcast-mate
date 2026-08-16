@@ -18,10 +18,7 @@ func New() *Adapter { return &Adapter{} }
 func (a *Adapter) ID() platform.ID { return platform.Douyin }
 
 func (a *Adapter) Login(ctx context.Context) (*adapter.LoginResult, error) {
-	cli, err := NewClient()
-	if err != nil {
-		return nil, err
-	}
+	cli := NewClient()
 	sec, err := cli.EnsureLogin(ctx)
 	if err != nil {
 		return nil, err
@@ -44,10 +41,7 @@ func (a *Adapter) Logout(ctx context.Context) (*adapter.LogoutResult, error) {
 }
 
 func (a *Adapter) Start(ctx context.Context, opts adapter.StartOpts) (*adapter.StartResult, error) {
-	cli, err := NewClient()
-	if err != nil {
-		return nil, err
-	}
+	cli := NewClient()
 	sec, err := cli.EnsureLogin(ctx)
 	if err != nil {
 		return nil, err
@@ -92,11 +86,7 @@ func (a *Adapter) Stop(ctx context.Context) (*adapter.StopResult, error) {
 		res.RoomID = t.RoomID
 	}
 	_ = StopKeepalive()
-	cli, err := NewClient()
-	if err != nil {
-		_ = live.Remove(platform.Douyin)
-		return res, nil
-	}
+	cli := NewClient()
 	if s, e := secrets.Load(platform.Douyin); e == nil {
 		cli.ApplySecrets(s)
 	}
@@ -113,10 +103,7 @@ func (a *Adapter) Status(ctx context.Context) (*adapter.StatusResult, error) {
 	if t, ok := live.Get(platform.Douyin); ok && (t.Server != "" || t.Key != "") {
 		out.RoomID, out.Server, out.Key, out.Status = t.RoomID, t.Server, t.Key, "live"
 	}
-	cli, err := NewClient()
-	if err != nil {
-		return out, nil
-	}
+	cli := NewClient()
 	if s, e := secrets.Load(platform.Douyin); e == nil {
 		cli.ApplySecrets(s)
 		out.AuthBuckets = adapter.AuthFromSecrets(s)

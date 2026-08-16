@@ -15,9 +15,7 @@ import (
 // EnsureLogin loads secrets or runs QR login (stderr progress).
 func (c *Client) EnsureLogin(ctx context.Context) (*secrets.File, error) {
 	if s, err := secrets.Load(platform.Bilibili); err == nil {
-		if err := c.ApplySecrets(s); err != nil {
-			return nil, err
-		}
+		c.ApplySecrets(s)
 		if ok, uid, name := c.checkNav(ctx); ok {
 			s.UserID = uid
 			s.UserName = name

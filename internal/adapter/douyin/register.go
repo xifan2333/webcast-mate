@@ -156,7 +156,7 @@ func (c *Client) fixDeviceFingerprint(ctx context.Context, P map[string]any) err
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.http.Do(req)
+	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		return err
 	}
@@ -210,7 +210,7 @@ func (c *Client) registerDevice(ctx context.Context) error {
 	}
 	req.Header.Set("User-Agent", uaTT)
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.http.Do(req)
+	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		return fmt.Errorf("device_register: %w", err)
 	}
@@ -256,7 +256,7 @@ func (c *Client) activate(ctx context.Context, did, iid string) error {
 	}
 	req.Header.Set("User-Agent", uaTT)
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.http.Do(req)
+	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		return err
 	}

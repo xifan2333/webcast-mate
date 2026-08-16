@@ -18,7 +18,7 @@ import (
 // EnsureLogin loads secrets or runs CAS QR login (same shape as bilibili/douyin).
 func (c *Client) EnsureLogin(ctx context.Context) (*secrets.File, error) {
 	if s, err := secrets.Load(platform.XiaoHongShu); err == nil && s.HasAuth() {
-		c.LoadSecrets(s)
+		c.ApplySecrets(s)
 		if ok, _ := c.CheckLogin(); ok {
 			return s, nil
 		}
@@ -136,7 +136,7 @@ func (c *Client) loginQR(ctx context.Context) (*secrets.File, error) {
 	c.UserID = conv.AnyString(ld["user_id"])
 	c.UserName = conv.AnyString(ld["nickname"])
 
-	s := c.SecretsFile()
+	s := c.ExportSecrets()
 	if err := secrets.Save(platform.XiaoHongShu, s); err != nil {
 		return nil, err
 	}

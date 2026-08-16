@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/cookiejar"
 	"net/url"
 	"strings"
 	"time"
 
 	"github.com/xifan2333/webcast-mate/internal/adapter"
+	"github.com/xifan2333/webcast-mate/internal/adapter/httpx"
 	"github.com/xifan2333/webcast-mate/internal/secrets"
 )
 
@@ -27,31 +27,36 @@ const (
 	urlBlinkGetInfo = "https://api.live.bilibili.com/xlive/app-blink/v1/room/GetInfo?platform=pc"
 )
 
-type Client struct {
-	http *http.Client
-	jar  http.CookieJar
-}
-
-func NewClient() (*Client, error) {
-	jar, err := cookiejar.New(nil)
-	if err != nil {
-		return nil, err
+var (
+	// biliSetHosts binds cookies onto these hosts.
+	biliSetHosts = []string{
+		"https://passport.bilibili.com",
+		"https://api.bilibili.com",
+		"https://api.live.bilibili.com",
+		"https://bilibili.com",
 	}
-	return &Client{
-		jar: jar,
-		http: &http.Client{
-			Timeout: 30 * time.Second,
-			Jar:     jar,
-		},
-	}, nil
+	// biliReadHosts reads cookies back from these hosts.
+	biliReadHosts = []string{
+		"https://api.bilibili.com",
+		"https://passport.bilibili.com",
+	}
+)
+
+// Client is the bilibili passport/live HTTP client.
+type Client struct {
+	*httpx.Client
 }
 
-func (c *Client) ApplySecrets(f *secrets.File) error {
+func NewClient() *Client {
+	return &Client{Client: httpx.New()}
+}
+
+func (c *Client) ApplySecrets(f *secrets.File) {
 	if f == nil {
-		return nil
+		return
 	}
 	f.Normalize()
-	return c.setCookieHeader(f.CookieHeader())
+	c.SetCookieHeader(f.CookieHeader(), ".bilibili.com", biliSetHosts...)
 }
 
 func (c *Client) ExportSecrets(userID, userName string, loginAt time.Time) *secrets.File {
@@ -61,88 +66,12 @@ func (c *Client) ExportSecrets(userID, userName string, loginAt time.Time) *secr
 	return f
 }
 
-func (c *Client) setCookieHeader(raw string) error {
-	if strings.TrimSpace(raw) == "" {
-		return nil
-	}
-	// apply to main bilibili domains
-	hosts := []string{
-		"https://passport.bilibili.com",
-		"https://api.bilibili.com",
-		"https://api.live.bilibili.com",
-		"https://bilibili.com",
-	}
-	for _, h := range hosts {
-		u, err := url.Parse(h)
-		if err != nil {
-			continue
-		}
-		var cookies []*http.Cookie
-		for _, part := range strings.Split(raw, ";") {
-			part = strings.TrimSpace(part)
-			if part == "" {
-				continue
-			}
-			k, v, ok := strings.Cut(part, "=")
-			if !ok {
-				continue
-			}
-			cookies = append(cookies, &http.Cookie{
-				Name:   strings.TrimSpace(k),
-				Value:  strings.TrimSpace(v),
-				Path:   "/",
-				Domain: ".bilibili.com",
-			})
-		}
-		c.jar.SetCookies(u, cookies)
-	}
-	return nil
-}
-
 func (c *Client) cookieString() string {
-	u, _ := url.Parse("https://api.bilibili.com")
-	var parts []string
-	seen := map[string]bool{}
-	for _, ck := range c.jar.Cookies(u) {
-		if seen[ck.Name] {
-			continue
-		}
-		seen[ck.Name] = true
-		parts = append(parts, ck.Name+"="+ck.Value)
-	}
-	// also passport jar
-	u2, _ := url.Parse("https://passport.bilibili.com")
-	for _, ck := range c.jar.Cookies(u2) {
-		if seen[ck.Name] {
-			continue
-		}
-		seen[ck.Name] = true
-		parts = append(parts, ck.Name+"="+ck.Value)
-	}
-	return strings.Join(parts, "; ")
+	return c.CookieString(biliReadHosts, nil)
 }
 
 func (c *Client) csrf() string {
-	u, _ := url.Parse("https://api.bilibili.com")
-	for _, ck := range c.jar.Cookies(u) {
-		if ck.Name == "bili_jct" {
-			return ck.Value
-		}
-	}
-	u2, _ := url.Parse("https://passport.bilibili.com")
-	for _, ck := range c.jar.Cookies(u2) {
-		if ck.Name == "bili_jct" {
-			return ck.Value
-		}
-	}
-	// parse from combined
-	for _, part := range strings.Split(c.cookieString(), ";") {
-		k, v, ok := strings.Cut(strings.TrimSpace(part), "=")
-		if ok && strings.TrimSpace(k) == "bili_jct" {
-			return strings.TrimSpace(v)
-		}
-	}
-	return ""
+	return c.CookieValue(biliReadHosts, []string{"bili_jct"})
 }
 
 func (c *Client) doJSON(method, rawURL string, form url.Values, headers map[string]string) ([]byte, error) {
@@ -164,7 +93,7 @@ func (c *Client) doJSON(method, rawURL string, form url.Values, headers map[stri
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
-	resp, err := c.http.Do(req)
+	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", adapter.ErrNetwork, err)
 	}

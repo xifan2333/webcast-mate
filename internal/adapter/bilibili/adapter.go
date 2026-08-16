@@ -18,10 +18,7 @@ func New() *Adapter { return &Adapter{} }
 func (a *Adapter) ID() platform.ID { return platform.Bilibili }
 
 func (a *Adapter) Login(ctx context.Context) (*adapter.LoginResult, error) {
-	cli, err := NewClient()
-	if err != nil {
-		return nil, err
-	}
+	cli := NewClient()
 	sess, err := cli.EnsureLogin(ctx)
 	if err != nil {
 		return nil, err
@@ -43,10 +40,7 @@ func (a *Adapter) Logout(ctx context.Context) (*adapter.LogoutResult, error) {
 }
 
 func (a *Adapter) Start(ctx context.Context, opts adapter.StartOpts) (*adapter.StartResult, error) {
-	cli, err := NewClient()
-	if err != nil {
-		return nil, err
-	}
+	cli := NewClient()
 	sess, err := cli.EnsureLogin(ctx)
 	if err != nil {
 		return nil, err
@@ -94,12 +88,9 @@ func (a *Adapter) Stop(ctx context.Context) (*adapter.StopResult, error) {
 		_ = live.Remove(platform.Bilibili)
 		return res, nil
 	}
-	cli, err := NewClient()
-	if err != nil {
-		return nil, err
-	}
+	cli := NewClient()
 	if s, e := secrets.Load(platform.Bilibili); e == nil {
-		_ = cli.ApplySecrets(s)
+		cli.ApplySecrets(s)
 	} else {
 		_ = live.Remove(platform.Bilibili)
 		return res, nil
@@ -128,12 +119,9 @@ func (a *Adapter) Status(ctx context.Context) (*adapter.StatusResult, error) {
 		}
 	}
 	// prefer blink GetInfo when logged in
-	cli, err := NewClient()
-	if err != nil {
-		return out, nil
-	}
+	cli := NewClient()
 	if s, err := secrets.Load(platform.Bilibili); err == nil {
-		_ = cli.ApplySecrets(s)
+		cli.ApplySecrets(s)
 		if info, err := cli.GetBlinkRoomInfo(); err == nil {
 			out.RoomID = info.RoomID
 			out.Status = LiveStatusString(info.LiveStatus)

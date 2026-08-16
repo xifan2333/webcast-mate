@@ -85,8 +85,8 @@ func (c *Client) ensureIdentity() {
 	}
 }
 
-// LoadSecrets applies secrets.File into the client (unified schema).
-func (c *Client) LoadSecrets(f *secrets.File) {
+// ApplySecrets applies secrets.File into the client (unified schema).
+func (c *Client) ApplySecrets(f *secrets.File) {
 	if f == nil {
 		return
 	}
@@ -116,8 +116,8 @@ func (c *Client) LoadSecrets(f *secrets.File) {
 	}
 }
 
-// SecretsFile builds the unified secrets.File for this client.
-func (c *Client) SecretsFile() *secrets.File {
+// ExportSecrets builds the unified secrets.File for this client.
+func (c *Client) ExportSecrets() *secrets.File {
 	c.ensureIdentity()
 	f := &secrets.File{
 		Version:  secrets.Version,

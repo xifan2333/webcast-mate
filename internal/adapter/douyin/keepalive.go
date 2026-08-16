@@ -112,10 +112,7 @@ func RunKeepalive() int {
 	sigc := make(chan os.Signal, 1)
 	signal.Notify(sigc, syscall.SIGTERM, syscall.SIGINT)
 
-	cli, err := NewClient()
-	if err != nil {
-		return 1
-	}
+	cli := NewClient()
 	if s, e := secrets.Load(platform.Douyin); e == nil {
 		cli.ApplySecrets(s)
 	}

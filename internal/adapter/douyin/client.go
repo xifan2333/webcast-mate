@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/cookiejar"
 	"net/url"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/xifan2333/webcast-mate/internal/adapter"
+	"github.com/xifan2333/webcast-mate/internal/adapter/httpx"
 	"github.com/xifan2333/webcast-mate/internal/conv"
 	"github.com/xifan2333/webcast-mate/internal/secrets"
 )
@@ -33,29 +33,29 @@ const (
 	RoomFinish  = 4
 )
 
+var (
+	dyCookieSetHosts  = []string{hostStreaming, hostAPI, "https://www.douyin.com"}
+	dyCookieReadHosts = []string{hostStreaming, hostAPI}
+	dyCookiePrefer    = []string{
+		"sessionid", "sessionid_ss", "sid_tt", "sid_guard", "sid_ucp_v1", "ssid_ucp_v1",
+		"uid_tt", "uid_tt_ss", "odin_tt", "passport_assist_user",
+		"passport_csrf_token", "passport_csrf_token_default", "ttwid",
+	}
+)
+
 // Client is streamingtool / webcast HTTP client (cookie jar).
 type Client struct {
-	http     *http.Client
-	jar      http.CookieJar
+	*httpx.Client
 	DeviceID string
 	IID      string
 }
 
-func NewClient() (*Client, error) {
-	jar, err := cookiejar.New(nil)
-	if err != nil {
-		return nil, err
-	}
-	c := &Client{
-		http: &http.Client{
-			Timeout: 30 * time.Second,
-			Jar:     jar,
-		},
-		jar:      jar,
+func NewClient() *Client {
+	return &Client{
+		Client:   httpx.New(),
 		DeviceID: envOr("WEBCAST_MATE_DY_DEVICE_ID", ""),
 		IID:      envOr("WEBCAST_MATE_DY_IID", ""),
 	}
-	return c, nil
 }
 
 func envOr(k, def string) string {
@@ -75,7 +75,7 @@ func (c *Client) ApplySecrets(f *secrets.File) {
 	}
 	f.Normalize()
 	if h := f.CookieHeader(); h != "" {
-		c.setCookieHeader(h)
+		c.SetCookieHeader(h, "", dyCookieSetHosts...)
 	}
 	if did := f.Params["did"]; did != "" {
 		c.DeviceID = did
@@ -170,78 +170,12 @@ func withABogus(queryEncoded, body string) (string, error) {
 	return queryEncoded + "&a_bogus=" + url.QueryEscape(ab), nil
 }
 
-func (c *Client) setCookieHeader(header string) {
-	if header == "" {
-		return
-	}
-	// Apply to all relevant hosts
-	var cks []*http.Cookie
-	for _, part := range strings.Split(header, ";") {
-		part = strings.TrimSpace(part)
-		k, v, ok := strings.Cut(part, "=")
-		if !ok || k == "" {
-			continue
-		}
-		cks = append(cks, &http.Cookie{Name: strings.TrimSpace(k), Value: strings.TrimSpace(v), Path: "/"})
-	}
-	for _, h := range []string{hostStreaming, hostAPI, "https://www.douyin.com"} {
-		u, _ := url.Parse(h)
-		c.jar.SetCookies(u, cks)
-	}
-}
-
 func (c *Client) cookieHeader() string {
-	seen := map[string]string{}
-	for _, h := range []string{hostStreaming, hostAPI} {
-		u, _ := url.Parse(h)
-		for _, ck := range c.jar.Cookies(u) {
-			if ck.Value != "" {
-				seen[ck.Name] = ck.Value
-			}
-		}
-	}
-	// stable-ish order
-	keys := make([]string, 0, len(seen))
-	for k := range seen {
-		keys = append(keys, k)
-	}
-	// prefer known session keys first
-	prefer := []string{
-		"sessionid", "sessionid_ss", "sid_tt", "sid_guard", "sid_ucp_v1", "ssid_ucp_v1",
-		"uid_tt", "uid_tt_ss", "odin_tt", "passport_assist_user",
-		"passport_csrf_token", "passport_csrf_token_default", "ttwid",
-	}
-	parts := make([]string, 0, len(seen))
-	used := map[string]bool{}
-	for _, k := range prefer {
-		if v, ok := seen[k]; ok {
-			parts = append(parts, k+"="+v)
-			used[k] = true
-		}
-	}
-	for k, v := range seen {
-		if !used[k] {
-			parts = append(parts, k+"="+v)
-		}
-	}
-	return strings.Join(parts, "; ")
+	return c.CookieString(dyCookieReadHosts, dyCookiePrefer)
 }
 
 func (c *Client) csrfToken() string {
-	u, _ := url.Parse(hostStreaming)
-	for _, ck := range c.jar.Cookies(u) {
-		if ck.Name == "passport_csrf_token" || ck.Name == "passport_csrf_token_default" {
-			return ck.Value
-		}
-	}
-	// scan all
-	for _, part := range strings.Split(c.cookieHeader(), ";") {
-		k, v, ok := strings.Cut(strings.TrimSpace(part), "=")
-		if ok && (k == "passport_csrf_token" || k == "passport_csrf_token_default") {
-			return v
-		}
-	}
-	return ""
+	return c.CookieValue(dyCookieReadHosts, []string{"passport_csrf_token", "passport_csrf_token_default"})
 }
 
 func (c *Client) do(method, fullURL string, body io.Reader, contentType string, extra map[string]string) ([]byte, error) {
@@ -269,7 +203,7 @@ func (c *Client) doHDR(method, fullURL string, body io.Reader, contentType strin
 	for k, v := range extra {
 		req.Header.Set(k, v)
 	}
-	resp, err := c.http.Do(req)
+	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: %v", adapter.ErrNetwork, err)
 	}

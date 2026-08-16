@@ -79,7 +79,7 @@ func (a *Adapter) Start(ctx context.Context, opts adapter.StartOpts) (*adapter.S
 	if server == "" {
 		server, key = pushURL, ""
 	}
-	sec := cli.SecretsFile()
+	sec := cli.ExportSecrets()
 	_ = secrets.Save(platform.XiaoHongShu, sec)
 	if err := live.Upsert(platform.XiaoHongShu, live.Target{
 		RoomID: roomID, Server: server, Key: key,
@@ -103,7 +103,7 @@ func (a *Adapter) Stop(ctx context.Context) (*adapter.StopResult, error) {
 	}
 	cli := NewClient()
 	if s, err := secrets.Load(platform.XiaoHongShu); err == nil {
-		cli.LoadSecrets(s)
+		cli.ApplySecrets(s)
 	}
 	if roomID != "" && cli.AccessToken != "" {
 		_ = cli.StopRoom(roomID)
@@ -123,7 +123,7 @@ func (a *Adapter) Status(ctx context.Context) (*adapter.StatusResult, error) {
 	if err != nil {
 		return out, nil
 	}
-	cli.LoadSecrets(s)
+	cli.ApplySecrets(s)
 	out.AuthBuckets = adapter.AuthFromSecrets(s)
 	ok, _ := cli.CheckLogin()
 	if !ok {
