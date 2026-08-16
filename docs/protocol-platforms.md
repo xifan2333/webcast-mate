@@ -260,7 +260,8 @@ ttwid → get_qrcode → check_qrconnect(confirmed) → 桌面 Cookie
 
 ## 3. 小红书 xhs
 
-> 弹幕/长连接协议（RWP）见独立文档 [protocol-xhs-danmaku.md](./protocol-xhs-danmaku.md)（与开播/推流码无关）。
+> 弹幕/长连接协议（RWP）见 [protocol-xhs-danmaku.md](./protocol-xhs-danmaku.md)（与开播/推流码无关）。  
+> **直播助手 4.4.0 开停播/登录/状态**见 [protocol-xhs-live-helper.md](./protocol-xhs-live-helper.md)（CAS + redobs center/room；静态+抓包）。
 
 
 ### 3.1 网页 OBS（6 位连接码 → 推流地址）
