@@ -459,7 +459,7 @@ type Adapter interface {
 - 单元测试：conf 合并、URL 拆 server/key、错误码映射。  
 - 集成测试：对 mock server；实网测试手动、不进 CI 密钥。  
 - 禁止测试提交真实 Cookie/短信/推流 key。  
-- `go test ./…`；release 用 `goreleaser`（Linux 单平台）。
+- `go build ./…`；release 用 GitHub Actions 多架构构建（Linux amd64/arm64，参考 dmnotifier）。
 
 ---
 
