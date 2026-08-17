@@ -1,6 +1,6 @@
 // Package appdir owns the single XDG layout for webcast-mate.
 //
-//	~/.config/webcast-mate/
+//	~/.config/webcastmate/
 //	  config.yaml           # preferences (no secrets)
 //	  secrets/<platform>.json  # cookie + login meta (0600)
 //	  live.json             # active push targets for capture (0600)
@@ -12,16 +12,16 @@ import (
 	"path/filepath"
 )
 
-// Root is ~/.config/webcast-mate (Linux-only; XDG).
+// Root is ~/.config/webcastmate (Linux-only; XDG).
 func Root() (string, error) {
 	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
-		return filepath.Join(xdg, "webcast-mate"), nil
+		return filepath.Join(xdg, "webcastmate"), nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".config", "webcast-mate"), nil
+	return filepath.Join(home, ".config", "webcastmate"), nil
 }
 
 func EnsureRoot() (string, error) {

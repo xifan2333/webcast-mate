@@ -291,7 +291,7 @@ func hasHelp(args []string) bool {
 func configRootDisplay() string {
 	p, err := appdir.Root()
 	if err != nil || p == "" {
-		return "$XDG_CONFIG_HOME/webcast-mate"
+		return "$XDG_CONFIG_HOME/webcastmate"
 	}
 	return p
 }

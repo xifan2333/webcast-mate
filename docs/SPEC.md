@@ -45,7 +45,7 @@
 ```text
                    ┌─ 画面链 ──────────────────────────────┐
 webcastmate       │ start 写 server/key                    │
-  start <platform> ┤→ ~/.config/webcast-mate/live.json   │
+  start <platform> ┤→ ~/.config/webcastmate/live.json   │
   (会话+开播+码) ──┤→ capture-router livestream start        │
                    ┤→ gpu-screen-recorder -o <url>          │
          │         └───────────────────────────────────────┘
@@ -167,7 +167,7 @@ webcastmate                          已有栈（arch-post-install）
 start / stop                          live.json
         │                                    │
         │  start 成功后写入                    │
-        └─────► ~/.config/webcast-mate/live.json
+        └─────► ~/.config/webcastmate/live.json
                                              │
                                              ▼
                                   capture-router livestream start
@@ -355,7 +355,7 @@ type Adapter interface {
 ### 6.3 会话存储（统一 secrets schema）
 
 ```text
-~/.config/webcast-mate/
+~/.config/webcastmate/
   secrets/<platform>.json   # 0600；三家同一 schema
   live.json                 # 本场 RTMP 真相（server/key/room_id）
   config.yaml               # 非密钥偏好（标题、码率…）
@@ -470,7 +470,7 @@ type Adapter interface {
 | [SPEC.md](./SPEC.md) | 本文件：产品边界、管道协作、CLI、Adapter、conf、无浏览器 |
 | [protocol-platforms.md](./protocol-platforms.md) | 三平台 HTTP 级协议与状态机 |
 | `~/douyin-live` | 可选 mitm 全量抓包工作区；协议以 `protocol-douyin-companion.md` 为准 |
-| `~/.config/webcast-mate/live.json` | 推流侧 conf（本工具的写入目标） |
+| `~/.config/webcastmate/live.json` | 推流侧 conf（本工具的写入目标） |
 | `capture-router` | 推流启停（本工具默认不替代） |
 | `unibarrage` | 弹幕采集转发（API :8080 / WS :7777），管道弹幕链消费本工具 session+room |
 | `dmnotifier` | `start/stop/list` + TUI；消费 UniBarrage WS |

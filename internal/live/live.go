@@ -1,6 +1,6 @@
 // Package live is the single source of truth for capture/push targets.
 //
-//	~/.config/webcast-mate/live.json
+//	~/.config/webcastmate/live.json
 //
 // Only platforms currently live appear here. Capture reads this file only.
 package live
@@ -103,7 +103,7 @@ func Get(id platform.ID) (Target, bool) {
 func Path() string {
 	p, err := appdir.LivePath()
 	if err != nil {
-		return "$XDG_CONFIG_HOME/webcast-mate/live.json"
+		return "$XDG_CONFIG_HOME/webcastmate/live.json"
 	}
 	return p
 }

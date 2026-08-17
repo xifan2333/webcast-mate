@@ -2,7 +2,7 @@
 
 Multi-platform **live protocol** CLI (name aligned with Douyin `webcast_mate` / StreamingTool).
 
-- **Does**: session + go-live RTMP + write `~/.config/webcast-mate/live.json` for capture + stop
+- **Does**: session + go-live RTMP + write `~/.config/webcastmate/live.json` for capture + stop
 - **Does not**: capture / encode / push (use `capture-router` + `gpu-screen-recorder`)
 - **Constraint**: **no browser** for login or open
 - **Language**: Go
@@ -49,7 +49,7 @@ webcastmate stop  ──► protocol end (+ douyin keepalive stop)
 ## Config layout
 
 ```text
-~/.config/webcast-mate/
+~/.config/webcastmate/
   config.yaml                 # room / title / 分区 / bitrate (no secrets)
   secrets/<platform>.json     # cookies only (0600)
   live.json                   # active RTMP targets — capture reads this
@@ -90,7 +90,7 @@ webcastmate start bilibili -y
 webcastmate stop bilibili
 ```
 
-Config is saved to `~/.config/webcast-mate/bilibili/config.yaml`.
+Config is saved to `~/.config/webcastmate/bilibili/config.yaml`.
 Cover accepts an existing `*.hdslb.com` URL (local file upload TBD).
 
 ## Reference

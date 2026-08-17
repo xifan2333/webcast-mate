@@ -121,7 +121,7 @@ func (f *File) Bitrate(id platform.ID) (video, audio int) {
 func Path() string {
 	p, err := appdir.ConfigPath()
 	if err != nil {
-		return "$XDG_CONFIG_HOME/webcast-mate/config.yaml"
+		return "$XDG_CONFIG_HOME/webcastmate/config.yaml"
 	}
 	return p
 }

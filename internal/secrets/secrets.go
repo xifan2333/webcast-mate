@@ -1,6 +1,6 @@
 // Package secrets stores request auth material separately from config.yaml.
 //
-//	~/.config/webcast-mate/secrets/<platform>.json  (0600)
+//	~/.config/webcastmate/secrets/<platform>.json  (0600)
 //
 // Layout mirrors requests.Session (Python):
 //
