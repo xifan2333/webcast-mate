@@ -44,7 +44,7 @@
 
 ```text
                    ┌─ 画面链 ──────────────────────────────┐
-webcast-mate       │ start 写 server/key                    │
+webcastmate       │ start 写 server/key                    │
   start <platform> ┤→ ~/.config/webcast-mate/live.json   │
   (会话+开播+码) ──┤→ capture-router livestream start        │
                    ┤→ gpu-screen-recorder -o <url>          │
@@ -93,7 +93,7 @@ GET    http://127.0.0.1:8080/all / {platform} / {platform}/{rid}
 
 - **`start`/`stop` 默认 stdout = compact 单行 JSON**（无需 `--json`；可 `jq`）。
 - 诊断/扫码提示走 **stderr**。
-- 后续可加 `webcast-mate events` 输出 **NDJSON 事件流**（start/stop 状态），
+- 后续可加 `webcastmate events` 输出 **NDJSON 事件流**（start/stop 状态），
   供 shell `while read` / 其它程序订阅——不阻塞本工具主流程。
 - 密钥/日志仍走 stderr 或 `0600` 文件，**不**进 stdout 污染管道。
 
@@ -124,8 +124,8 @@ dmnotifier --ws ws://127.0.0.1:7777 \
 
 ```text
 ~/.config/livestream/hooks/
-  pre_start    # livestream start 前执行（可调 webcast-mate start）
-  post_stop    # livestream stop 后执行（可调 webcast-mate stop）
+  pre_start    # livestream start 前执行（可调 webcastmate start）
+  post_stop    # livestream stop 后执行（可调 webcastmate stop）
 ```
 
 - **hook 是编排入口**：画面与协议的启停解耦——capture 管 gsr，hook 里调 `webcast-mate`。
@@ -162,7 +162,7 @@ dmnotifier --ws ws://127.0.0.1:7777 \
 ## 4. 与本机推流栈的契约
 
 ```
-webcast-mate                          已有栈（arch-post-install）
+webcastmate                          已有栈（arch-post-install）
 ────────────                          ────────────────────────
 start / stop                          live.json
         │                                    │
@@ -213,12 +213,12 @@ key = …
 
 ## 5. CLI 表面（稳定契约）
 
-二进制名：`webcast-mate`。
+二进制名：`webcastmate`。
 
 ```text
-webcast-mate
-webcast-mate <command> <platform>
-webcast-mate help | version | -h | --help | -v | --version
+webcastmate
+webcastmate <command> <platform>
+webcastmate help | version | -h | --help | -v | --version
 ```
 
 ### 5.1 platform id（稳定，小写，**无别名**）
@@ -265,7 +265,7 @@ webcast-mate help | version | -h | --help | -v | --version
 | `key` | 推流密钥，写入 conf |
 
 ```bash
-out=$(webcast-mate start douyin)
+out=$(webcastmate start douyin)
 echo "$out" | jq -r .server
 echo "$out" | jq -r .key
 dmnotifier start "$(echo "$out" | jq -r '[.platform,.room_id,.cookie]|join(":")')"

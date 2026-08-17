@@ -34,7 +34,7 @@ func run(args []string) int {
 		printHelp()
 		return 0
 	case "-v", "--version", "version":
-		fmt.Println("webcast-mate", version)
+		fmt.Println("webcastmate", version)
 		return 0
 	case "login", "logout", "start", "stop", "status":
 		return runCommand(args[0], args[1:])
@@ -180,10 +180,10 @@ func runCommand(name string, args []string) int {
 }
 
 func printHelp() {
-	fmt.Fprintf(os.Stderr, `webcast-mate — multi-platform live protocol CLI (no browser)
+	fmt.Fprintf(os.Stderr, `webcastmate — multi-platform live protocol CLI (no browser)
 
 USAGE
-  webcast-mate <command> <platform> [-y]
+  webcastmate <command> <platform> [-y]
 
 COMMANDS
   login   <platform>   ensure session (QR if needed) → secrets
@@ -213,11 +213,11 @@ STDERR
   QR graphics (plain) + JSONL diagnostics (e.g. face auth). help is plain. No progress spam.
 
 EXAMPLES
-  webcast-mate login bilibili | jq -c '{ok,user_name,user_id}'
-  webcast-mate start bilibili -y | jq -r .server
-  webcast-mate status douyin | jq -c .
-  webcast-mate stop xiaohongshu | jq -e .ok
-  webcast-mate logout douyin | jq -c .
+  webcastmate login bilibili | jq -c '{ok,user_name,user_id}'
+  webcastmate start bilibili -y | jq -r .server
+  webcastmate status douyin | jq -c .
+  webcastmate stop xiaohongshu | jq -e .ok
+  webcastmate logout douyin | jq -c .
 
 CONFIG
   %s/
@@ -250,7 +250,7 @@ func stripYes(args []string) (yes bool, rest []string) {
 
 func parsePlatformArg(args []string, cmd string) (platform.ID, int) {
 	if len(args) != 1 {
-		fail(2, cmd, "", "usage: webcast-mate "+cmd+" <platform>")
+		fail(2, cmd, "", "usage: webcastmate "+cmd+" <platform>")
 		return "", 2
 	}
 	id, ok := platform.Parse(args[0])

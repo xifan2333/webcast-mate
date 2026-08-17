@@ -255,7 +255,7 @@ key    = path 最后一段 + query
 非交互示例：
 
 ```bash
-WEBCAST_MATE_XHS_CODE=254966 webcast-mate start xiaohongshu -y
+WEBCAST_MATE_XHS_CODE=254966 webcastmate start xiaohongshu -y
 ```
 
 #### 状态机（OBS）

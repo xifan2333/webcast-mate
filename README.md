@@ -1,4 +1,4 @@
-# webcast-mate
+# webcastmate
 
 Multi-platform **live protocol** CLI (name aligned with Douyin `webcast_mate` / StreamingTool).
 
@@ -19,15 +19,15 @@ Multi-platform **live protocol** CLI (name aligned with Douyin `webcast_mate` / 
 ## CLI (SPEC §5)
 
 ```bash
-webcast-mate start <platform>   # → JSON: platform, room_id, cookie, server, key
-webcast-mate stop  <platform>   # → JSON: platform, room_id, status
-webcast-mate -h | -v
+webcastmate start <platform>   # → JSON: platform, room_id, cookie, server, key
+webcastmate stop  <platform>   # → JSON: platform, room_id, status
+webcastmate -h | -v
 ```
 
 Platforms (no aliases): `bilibili` `douyin` `xiaohongshu`
 
 ```bash
-out=$(webcast-mate start douyin)
+out=$(webcastmate start douyin)
 echo "$out" | jq -r .server
 echo "$out" | jq -r .key
 # optional danmaku
@@ -39,11 +39,11 @@ Douyin differs internally: `create` + periodic `ping LIVING` keepalive; `stop` s
 ## Pipe
 
 ```text
-webcast-mate start ──► stdout JSON + platforms.conf
+webcastmate start ──► stdout JSON + platforms.conf
         │                      │
         │                      └─► capture-router / gsr (video)
         └─► script ──► dmnotifier start platform:rid:cookie ──► UniBarrage
-webcast-mate stop  ──► protocol end (+ douyin keepalive stop)
+webcastmate stop  ──► protocol end (+ douyin keepalive stop)
 ```
 
 ## Config layout
@@ -60,7 +60,7 @@ Capture (`livestream-service`) loads `live.json` only. No `platforms.conf`.
 ## Build
 
 ```bash
-go build -o webcast-mate ./cmd/webcast-mate
+go build -o webcastmate ./cmd/webcastmate
 go test ./...
 ```
 
@@ -82,12 +82,12 @@ Next: reverse 2026 小红书直播伴侣 for start/stop/status.
 
 ```bash
 # interactive (npm-init style): room / title / area / cover
-webcast-mate start bilibili
+webcastmate start bilibili
 
 # non-interactive: use saved config
-webcast-mate start bilibili -y
+webcastmate start bilibili -y
 
-webcast-mate stop bilibili
+webcastmate stop bilibili
 ```
 
 Config is saved to `~/.config/webcast-mate/bilibili/config.yaml`.

@@ -50,7 +50,7 @@ func isTTY() bool {
 }
 
 func writeTempPNG(png []byte) (string, error) {
-	f, err := os.CreateTemp("", "webcast-mate-qr-*.png")
+	f, err := os.CreateTemp("", "webcastmate-qr-*.png")
 	if err != nil {
 		return "", err
 	}
