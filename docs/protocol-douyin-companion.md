@@ -5,7 +5,7 @@
 > 静态入口：`resources/app/app.content/resource/js/`  
 > 抓包样例（本机）：`/tmp/douyin_login_flows.jsonl`（全量、无 path 过滤）。
 
-本文描述 **官方伴侣真实链路**，供 `webcast-mate` Douyin adapter 实现对照。  
+本文描述 **官方伴侣真实链路**，供 `webcastmate` Douyin adapter 实现对照。  
 **不要**再沿用早期「小 query、无 a_bogus、host 写成 webcast-pc」的猜测稿。
 
 ---
@@ -367,7 +367,7 @@ body: stream_id & room_id & status [& reason_no]
 ### 2.6 推流
 
 - URL：`data.stream_url.rtmp_push_url`（可拆 server/key，或整 URL 给编码器）。  
-- 伴侣本地 mediasdk 推流；`webcast-mate` 只产出 server/key 写入 `live.json`，编码仍走 gsr 等。  
+- 伴侣本地 mediasdk 推流；`webcastmate` 只产出 server/key 写入 `live.json`，编码仍走 gsr 等。  
 - 首帧连通有打点（`firstPushStreamEvent`，约 30s 超时语义）。
 
 ---
@@ -416,7 +416,7 @@ ping/anchor  status=4
 
 ---
 
-## 5. 最小实现清单（webcast-mate）
+## 5. 最小实现清单（webcastmate）
 
 ### 登录
 
@@ -888,7 +888,7 @@ window.byted_acrawler.frontierSign({ "X-MS-STUB": stub })
 
 用于 `im/fetch` 等，**不是** `room/create` 主链的 `a_bogus` 拼装点；但依赖同一 `byted_acrawler` 运行时。
 
-### 10.7 对 webcast-mate 的可执行拆分
+### 10.7 对 webcastmate 的可执行拆分
 
 | 模块 | 难度 | 依据 |
 |------|------|------|

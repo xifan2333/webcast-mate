@@ -1,4 +1,4 @@
-// Package appdir owns the single XDG layout for webcast-mate.
+// Package appdir owns the single XDG layout for webcastmate.
 //
 //	~/.config/webcastmate/
 //	  config.yaml           # preferences (no secrets)

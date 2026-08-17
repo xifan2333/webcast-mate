@@ -215,7 +215,7 @@ key    = {room_id}?txSecret=…&txTime=…&redExpire=…&vendor=hw|tencent
 
 ---
 
-## 5. 状态查询（给 webcast-mate status）
+## 5. 状态查询（给 webcastmate status）
 
 | 目的 | 接口 |
 |------|------|
@@ -242,7 +242,7 @@ key    = {room_id}?txSecret=…&txTime=…&redExpire=…&vendor=hw|tencent
 
 ---
 
-## 7. webcast-mate 实现要点（待写 adapter）
+## 7. webcastmate 实现要点（待写 adapter）
 
 ```
 login:

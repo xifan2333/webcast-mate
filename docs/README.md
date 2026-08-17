@@ -1,4 +1,4 @@
-# webcast-mate docs
+# webcastmate docs
 
 | 文档 | 说明 |
 |------|------|

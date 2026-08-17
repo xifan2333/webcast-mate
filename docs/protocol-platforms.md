@@ -243,7 +243,7 @@ key    = path 最后一段 + query
 
 页面入口（人用）：`https://www.xiaohongshu.com/zhibo/obs`（历史上也有 `zhibo/robs` 落地页名，**不等于**实现 robs 短信 API）。
 
-#### webcast-mate 目标行为
+#### webcastmate 目标行为
 
 ```
 登录态（待定：须与 push_url 同源 cookie；edith 笔记扫码 ≠ 自动等于 OBS 登录）
@@ -283,7 +283,7 @@ WEBCAST_MATE_XHS_CODE=254966 webcastmate start xiaohongshu -y
 | **推流码形态** | addr + code 两段 | 完整 rtmp_push_url | 完整 push_url / 固定 server+key |
 | **码是否一场一变** | 是 | 是 | 是（常换 6 位码） |
 | **额外门槛** | 人脸 60024 | 桌面会话；a_bogus | 手机预直播出码 |
-| **本仓库状态** | 协议清（油猴+扫码探活） | webcast-mate：登录+create+ping（a_bogus 经 chromium/bdms） | OBS 取码路径；登录来源待实机；伴侣逆向后补 status |
+| **本仓库状态** | 协议清（油猴+扫码探活） | webcastmate：登录+create+ping（a_bogus 经 chromium/bdms） | OBS 取码路径；登录来源待实机；伴侣逆向后补 status |
 | **写入 conf** | server=addr, key=code | 拆 url 或整段 | server 固定 + key |
 
 ---

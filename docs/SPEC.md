@@ -1,4 +1,4 @@
-# webcast-mate · 产品与扩展规范
+# webcastmate · 产品与扩展规范
 
 > 状态：**规范阶段**（无实现要求）。  
 > 实现语言倾向：**Go**（单文件、标准库 HTTP；性能对协议 CLI 足够）。  
@@ -26,10 +26,10 @@
 ## 2. 管道与协作（核心哲学）
 
 > 不造大而全的直播套件。每个程序只做一段，靠**标准接口**串成链：
-> `webcast-mate` 管「会话+房间+推流码」，`UniBarrage` 管「弹幕采集转发」，
+> `webcastmate` 管「会话+房间+推流码」，`UniBarrage` 管「弹幕采集转发」，
 > `dmnotifier` 管「通知/TUI/TTS」，gsr 管「画面」。
 >
-> **三者均为自有项目**（webcast-mate 待建；UniBarrage、dmnotifier 已在用），
+> **三者均为自有项目**（webcastmate 待建；UniBarrage、dmnotifier 已在用），
 > 管道契约可随需求协同演进，不必迁就第三方上游。
 
 ### 2.1 原则
@@ -63,7 +63,7 @@ stop <platform> → 协议关播（抖音: 停保活 + ping FINISH）
 
 UniBarrage 已装（`/usr/bin/unibarrage`，默认 `API :8080`、`WS :7777`）。它需要的输入正好是本工具产出：
 
-| UniBarrage 字段 | 来源（webcast-mate） |
+| UniBarrage 字段 | 来源（webcastmate） |
 |-----------------|----------------------|
 | `platform` | platform id（`bilibili`/`douyin`/`xiaohongshu`，无别名） |
 | `rid` | `start` 返回的 `room_id` |
@@ -99,7 +99,7 @@ GET    http://127.0.0.1:8080/all / {platform} / {platform}/{rid}
 
 ### 2.6 下游演进需求（跨项目，均为自有）
 
-管道契约会随下游演进，以下两项是**后续要改的下游项目**，webcast-mate 接口需预先兼容：
+管道契约会随下游演进，以下两项是**后续要改的下游项目**，webcastmate 接口需预先兼容：
 
 #### 2.6.1 dmnotifier：多订阅 + CLI 传参
 
@@ -115,7 +115,7 @@ dmnotifier --ws ws://127.0.0.1:7777 \
 
 - **多订阅**：一次启动消费多个 `platform:rid`（UniBarrage WS 消息已带 `platform`/`rid`，客户端按需过滤）。
 - **CLI 传参启动**：不再只读 config.yaml；参数可覆盖配置文件，缺省回落文件。
-- **对 webcast-mate 的要求**：`start` JSON 含 `platform`/`room_id`/`cookie`，脚本拼 `dmnotifier start platform:rid:cookie`。
+- **对 webcastmate 的要求**：`start` JSON 含 `platform`/`room_id`/`cookie`，脚本拼 `dmnotifier start platform:rid:cookie`。
 
 #### 2.6.2 capture-router：生命周期 hook
 
@@ -128,8 +128,8 @@ dmnotifier --ws ws://127.0.0.1:7777 \
   post_stop    # livestream stop 后执行（可调 webcastmate stop）
 ```
 
-- **hook 是编排入口**：画面与协议的启停解耦——capture 管 gsr，hook 里调 `webcast-mate`。
-- **对 webcast-mate 的要求**：`start`/`stop` 必须**幂等、可被 hook 反复调用**（`stop` 无房间视为成功）；
+- **hook 是编排入口**：画面与协议的启停解耦——capture 管 gsr，hook 里调 `webcastmate`。
+- **对 webcastmate 的要求**：`start`/`stop` 必须**幂等、可被 hook 反复调用**（`stop` 无房间视为成功）；
   hook 调用时用 stdout JSON + 退出码，不靠人读文案。
 - 与 2.4 不冲突：hook（画面侧编排）与 `--barrage`（弹幕侧编排）可独立启用。
 
@@ -138,10 +138,10 @@ dmnotifier --ws ws://127.0.0.1:7777 \
 | 改动 | 归属仓库 | 依赖 |
 |------|----------|------|
 | dmnotifier CLI | dmnotifier | 已落地 `start/stop/list`；mate 输出 cookie/room 即可 |
-| capture hook | arch-post-install | 无；webcast-mate 只需幂等命令 |
+| capture hook | arch-post-install | 无；webcastmate 只需幂等命令 |
 | UniBarrage 加 xhs | UniBarrage | xhs 弹幕协议文档 |
 
-> 三处下游改动**不阻塞** webcast-mate P1–P4；只在 P5（管道接通）前需定型接口。
+> 三处下游改动**不阻塞** webcastmate P1–P4；只在 P5（管道接通）前需定型接口。
 
 ---
 
@@ -199,7 +199,7 @@ key = …
 - **只使用现有字段**：`server` + `key` + 码率。不引入 `url_command` 等动态字段（已否决）。  
 - `start`：更新对应段的 `server`/`key`（保留用户码率；段不存在则创建默认码率）。  
 - `stop`：**只做协议关播**，不强制改 conf；是否清空 key 由实现可选（建议保留上次码便于排查，并在文档说明已失效）。  
-- 推流启停：**用户或脚本**调用 `capture-router`，不强制 `webcast-mate` 绑死 gsr。
+- 推流启停：**用户或脚本**调用 `capture-router`，不强制 `webcastmate` 绑死 gsr。
 
 ### 4.2 一场一码
 
