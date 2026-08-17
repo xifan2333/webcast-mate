@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/xifan2333/webcast-mate/internal/adapter"
-	"github.com/xifan2333/webcast-mate/internal/appcfg"
 	"github.com/xifan2333/webcast-mate/internal/conv"
 	"github.com/xifan2333/webcast-mate/internal/live"
 	"github.com/xifan2333/webcast-mate/internal/platform"
@@ -66,12 +65,7 @@ func (a *Adapter) Start(ctx context.Context, opts adapter.StartOpts) (*adapter.S
 	if err := cli.BeforeStart(roomID); err != nil {
 		return nil, err
 	}
-	file, _ := appcfg.Load()
-	vbr, abr := 4000, 128
-	if file != nil {
-		vbr, abr = file.Bitrate(platform.XiaoHongShu)
-	}
-	_ = cli.ReportPushInfo(roomID, pushURL, 1280, 720, vbr, 30)
+	_ = cli.ReportPushInfo(roomID, pushURL, 1280, 720, 4000, 30)
 	if err := cli.StartRoom(roomID, ocfg.Title, ocfg.Cover, ocfg.Distribute, ocfg.Area); err != nil {
 		return nil, err
 	}
@@ -82,8 +76,7 @@ func (a *Adapter) Start(ctx context.Context, opts adapter.StartOpts) (*adapter.S
 	sec := cli.ExportSecrets()
 	_ = secrets.Save(platform.XiaoHongShu, sec)
 	if err := live.Upsert(platform.XiaoHongShu, live.Target{
-		RoomID: roomID, Server: server, Key: key,
-		VideoBitrate: vbr, AudioBitrate: abr, StartedAt: time.Now().UTC(),
+		RoomID: roomID, Server: server, Key: key, StartedAt: time.Now().UTC(),
 	}); err != nil {
 		return nil, err
 	}

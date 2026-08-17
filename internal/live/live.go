@@ -25,12 +25,10 @@ type File struct {
 type Target struct {
 	RoomID string `json:"room_id"`
 	// StreamID is platform-specific (douyin ping/anchor needs it).
-	StreamID     string    `json:"stream_id,omitempty"`
-	Server       string    `json:"server"`
-	Key          string    `json:"key"`
-	VideoBitrate int       `json:"video_bitrate"`
-	AudioBitrate int       `json:"audio_bitrate"`
-	StartedAt    time.Time `json:"started_at"`
+	StreamID  string    `json:"stream_id,omitempty"`
+	Server    string    `json:"server"`
+	Key       string    `json:"key"`
+	StartedAt time.Time `json:"started_at"`
 }
 
 func Load() (*File, error) {

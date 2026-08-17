@@ -38,14 +38,14 @@ webcastmate start ──► stdout JSON ──► dmnotifier start platform:rid:
 
 ```text
 ~/.config/webcastmate/
-  config.yaml                 # 偏好（title/area/码率），无密钥
+  config.yaml                 # 偏好（title/area），无密钥
   secrets/<platform>.json     # 登录 cookie（0600）
   live.json                   # 当前推流目标，capture-router 只读这个
   run/                        # douyin keepalive 的 pid / log
 ```
 
 - `start` 成功会写 `live.json`；`stop` 会清掉对应平台段（空则删文件）。
-- `live.json` 是「本场 RTMP 真相」：`server` + `key` + `room_id` + 码率。
+- `live.json` 是「本场 RTMP 真相」：`server` + `key` + `room_id`。
 
 ## 4. 开播流程（完整）
 

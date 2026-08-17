@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/xifan2333/webcast-mate/internal/adapter"
-	"github.com/xifan2333/webcast-mate/internal/appcfg"
 	"github.com/xifan2333/webcast-mate/internal/live"
 	"github.com/xifan2333/webcast-mate/internal/platform"
 	"github.com/xifan2333/webcast-mate/internal/secrets"
@@ -54,14 +53,9 @@ func (a *Adapter) Start(ctx context.Context, opts adapter.StartOpts) (*adapter.S
 	if err != nil {
 		return nil, err
 	}
-	file, _ := appcfg.Load()
-	vbr, abr := 4000, 128
-	if file != nil {
-		vbr, abr = file.Bitrate(platform.Douyin)
-	}
 	if err := live.Upsert(platform.Douyin, live.Target{
 		RoomID: cr.RoomID, StreamID: cr.StreamID, Server: cr.Server, Key: cr.Key,
-		VideoBitrate: vbr, AudioBitrate: abr, StartedAt: time.Now().UTC(),
+		StartedAt: time.Now().UTC(),
 	}); err != nil {
 		return nil, err
 	}

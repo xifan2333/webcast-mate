@@ -53,14 +53,8 @@ func (a *Adapter) Start(ctx context.Context, opts adapter.StartOpts) (*adapter.S
 	if err != nil {
 		return nil, err
 	}
-	file, _ := appcfg.Load()
-	vbr, abr := 3200, 128
-	if file != nil {
-		vbr, abr = file.Bitrate(platform.Bilibili)
-	}
 	if err := live.Upsert(platform.Bilibili, live.Target{
-		RoomID: cfg.RoomID, Server: server, Key: key,
-		VideoBitrate: vbr, AudioBitrate: abr, StartedAt: time.Now().UTC(),
+		RoomID: cfg.RoomID, Server: server, Key: key, StartedAt: time.Now().UTC(),
 	}); err != nil {
 		return nil, err
 	}

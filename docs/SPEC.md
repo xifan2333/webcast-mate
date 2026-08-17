@@ -182,8 +182,6 @@ start / stop                          live.json
 [bilibili]   # 段名 = platform id（小写英文）
 server = rtmp://…
 key = …
-video_bitrate = 3200
-audio_bitrate = 128
 
 [douyin]
 server = rtmp://…
@@ -196,8 +194,8 @@ key = …
 …
 ```
 
-- **只使用现有字段**：`server` + `key` + 码率。不引入 `url_command` 等动态字段（已否决）。  
-- `start`：更新对应段的 `server`/`key`（保留用户码率；段不存在则创建默认码率）。  
+- **只使用现有字段**：`server` + `key`。不引入 `url_command` 等动态字段（已否决）。  
+- `start`：更新对应段的 `server`/`key`。  
 - `stop`：**只做协议关播**，不强制改 conf；是否清空 key 由实现可选（建议保留上次码便于排查，并在文档说明已失效）。  
 - 推流启停：**用户或脚本**调用 `capture-router`，不强制 `webcastmate` 绑死 gsr。
 
@@ -358,7 +356,7 @@ type Adapter interface {
 ~/.config/webcastmate/
   secrets/<platform>.json   # 0600；三家同一 schema
   live.json                 # 本场 RTMP 真相（server/key/room_id）
-  config.yaml               # 非密钥偏好（标题、码率…）
+  config.yaml               # 非密钥偏好（标题、分区…）
 ```
 
 `secrets/<platform>.json` 字段固定：
@@ -385,9 +383,8 @@ type Adapter interface {
 
 1. 读现有 ini（保留其它段与注释策略：实现可选用“只改目标段键值，尽量保留文件其余部分”）。  
 2. 设置 `server`、`key`。  
-3. `video_bitrate` / `audio_bitrate`：段已存在则**不覆盖**用户值；新建段用默认（建议 bili 3200、douyin 4000、xhs 4000，音频 128）。  
-4. 文件权限：目录 `0700`，文件 `0600`。  
-5. `open` 失败**不得**写入半截码。
+3. 文件权限：目录 `0700`，文件 `0600`。  
+4. `open` 失败**不得**写入半截码。
 
 ### 6.5 新增平台清单
 

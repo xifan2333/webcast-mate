@@ -51,7 +51,7 @@ webcastmate stop  ──► protocol end (+ douyin keepalive stop)
 
 ```text
 ~/.config/webcastmate/
-  config.yaml                 # room / title / 分区 / bitrate (no secrets)
+  config.yaml                 # room / title / 分区 (no secrets)
   secrets/<platform>.json     # cookies only (0600)
   live.json                   # active RTMP targets — capture reads this
 ```

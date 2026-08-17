@@ -8,33 +8,23 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// File is the single user-facing config (no cookies).
+// File is the single user-facing config (no cookies, no bitrate — bitrate is
+// owned by the streaming layer).
 type File struct {
-	Defaults  Defaults            `yaml:"defaults"`
 	Platforms map[string]Platform `yaml:"platforms"`
-}
-
-type Defaults struct {
-	VideoBitrate int `yaml:"video_bitrate"`
-	AudioBitrate int `yaml:"audio_bitrate"`
 }
 
 // Platform holds durable open preferences for one platform.
 type Platform struct {
-	RoomID       string `yaml:"room_id,omitempty"`
-	Area         string `yaml:"area,omitempty"` // partition: bili leaf id / dy base|leaf / xhs leaf id
-	Title        string `yaml:"title,omitempty"`
-	VideoBitrate int    `yaml:"video_bitrate,omitempty"`
-	AudioBitrate int    `yaml:"audio_bitrate,omitempty"`
+	RoomID string `yaml:"room_id,omitempty"`
+	Area   string `yaml:"area,omitempty"` // partition: bili leaf id / dy base|leaf / xhs leaf id
+	Title  string `yaml:"title,omitempty"`
 }
 
 func defaultFile() *File {
 	return &File{
-		Defaults: Defaults{VideoBitrate: 3200, AudioBitrate: 128},
 		Platforms: map[string]Platform{
-			"bilibili":    {Area: "21", VideoBitrate: 3200, AudioBitrate: 128},
-			"douyin":      {VideoBitrate: 4000, AudioBitrate: 128},
-			"xiaohongshu": {VideoBitrate: 4000, AudioBitrate: 128},
+			"bilibili": {Area: "21"},
 		},
 	}
 }
@@ -58,12 +48,6 @@ func Load() (*File, error) {
 	}
 	if f.Platforms == nil {
 		f.Platforms = map[string]Platform{}
-	}
-	if f.Defaults.VideoBitrate == 0 {
-		f.Defaults.VideoBitrate = 3200
-	}
-	if f.Defaults.AudioBitrate == 0 {
-		f.Defaults.AudioBitrate = 128
 	}
 	return f, nil
 }
@@ -96,25 +80,6 @@ func (f *File) SetPlatform(id platform.ID, p Platform) error {
 	}
 	f.Platforms[string(id)] = p
 	return Save(f)
-}
-
-// Bitrate returns effective bitrates for platform.
-func (f *File) Bitrate(id platform.ID) (video, audio int) {
-	video, audio = f.Defaults.VideoBitrate, f.Defaults.AudioBitrate
-	p := f.GetPlatform(id)
-	if p.VideoBitrate > 0 {
-		video = p.VideoBitrate
-	}
-	if p.AudioBitrate > 0 {
-		audio = p.AudioBitrate
-	}
-	if video == 0 {
-		video = 3200
-	}
-	if audio == 0 {
-		audio = 128
-	}
-	return video, audio
 }
 
 // Path returns config.yaml path for messages.

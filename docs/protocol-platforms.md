@@ -131,8 +131,6 @@ csrf={bili_jct}
 [bilibili]
 server = {data.rtmp.addr}    # 注意保留末尾 /
 key    = {data.rtmp.code}    # 通常以 ?streamname= 开头
-video_bitrate = 3200
-audio_bitrate = 128
 ```
 
 你当前 conf 就是某次 startLive 的产物；**每开一场应更新 key（addr 也可能变）**。
