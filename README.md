@@ -15,6 +15,7 @@ Multi-platform **live protocol** CLI (name aligned with Douyin `webcast_mate` / 
 | [docs/SPEC.md](./docs/SPEC.md) | Boundary, pipe model, **CLI `start`/`stop`**, JSON fields, adapters |
 | [docs/protocol-platforms.md](./docs/protocol-platforms.md) | Platform HTTP details |
 | [docs/protocol-xhs-danmaku.md](./docs/protocol-xhs-danmaku.md) | Xiaohongshu danmaku (UniBarrage) |
+| [docs/pipeline.md](./docs/pipeline.md) | How the pieces fit together (capture-router / dmnotifier / herdr) |
 
 ## CLI (SPEC §5)
 
